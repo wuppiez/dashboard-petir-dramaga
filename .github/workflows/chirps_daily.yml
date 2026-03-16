@@ -1,0 +1,61 @@
+name: 🌧️ CHIRPS Daily Update
+
+on:
+  # Jadwal otomatis: setiap hari jam 01.00 UTC = 08.00 WIB
+  schedule:
+    - cron: '0 1 * * *'
+
+  # Tombol manual — bisa dijalankan kapan saja dari GitHub
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Mode update'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - backfill
+
+jobs:
+  update-chirps:
+    name: Download & Simpan CHIRPS ke Supabase
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Ambil kode dari repository
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Setup Python
+      - name: 🐍 Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # 3. Install library
+      - name: 📦 Install dependencies
+        run: pip install requests pandas numpy
+
+      # 4. Jalankan update harian atau backfill
+      - name: 🌧️ Download CHIRPS & Simpan ke Supabase
+        env:
+          SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          TZ: Asia/Jakarta
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "backfill" ]; then
+            echo "Mode: Backfill 30 hari terakhir"
+            python chirps_update.py --backfill --days 30
+          else
+            echo "Mode: Update harian"
+            python chirps_update.py
+          fi
+
+      # 5. Tampilkan ringkasan hasil
+      - name: ✅ Verifikasi hasil
+        env:
+          SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: python setup_supabase.py --verify
