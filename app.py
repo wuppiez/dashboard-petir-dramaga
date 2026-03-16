@@ -106,6 +106,75 @@ def fetch_forecast():
                       "rain": {"3h": round(ch, 2)}})
     return {"list": items}
 
+# ─── OPEN-METEO API (Suhu Tanah, Kelembaban Tanah, UV, dll) ──────────────────────
+def fetch_openmeteo():
+    """Ambil data lengkap dari Open-Meteo API - gratis, tanpa API key."""
+    try:
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={LAT}&longitude={LON}"
+            f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
+            f"precipitation,rain,wind_speed_10m,wind_direction_10m,"
+            f"surface_pressure,cloud_cover,uv_index,dew_point_2m,"
+            f"soil_temperature_0cm,soil_temperature_6cm,soil_temperature_18cm,"
+            f"soil_moisture_0_to_1cm,soil_moisture_1_to_3cm,soil_moisture_3_to_9cm"
+            f"&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,"
+            f"uv_index_max,wind_speed_10m_max,et0_fao_evapotranspiration"
+            f"&timezone=Asia%2FJakarta&forecast_days=7"
+        )
+        r = requests.get(url, timeout=8)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        print(f"Open-Meteo error: {e}")
+    # Fallback demo data
+    return {
+        "current": {
+            "temperature_2m": 27.5,
+            "relative_humidity_2m": 82,
+            "apparent_temperature": 30.1,
+            "precipitation": 2.4,
+            "rain": 2.4,
+            "wind_speed_10m": 8.3,
+            "wind_direction_10m": 180,
+            "surface_pressure": 1010.0,
+            "cloud_cover": 75,
+            "uv_index": 3.5,
+            "dew_point_2m": 22.1,
+            "soil_temperature_0cm": 28.2,
+            "soil_temperature_6cm": 26.5,
+            "soil_temperature_18cm": 25.1,
+            "soil_moisture_0_to_1cm": 0.35,
+            "soil_moisture_1_to_3cm": 0.38,
+            "soil_moisture_3_to_9cm": 0.40,
+        },
+        "daily": {
+            "time": [(now_wib() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)],
+            "precipitation_sum": [12.1, 5.3, 0.0, 8.7, 15.2, 3.1, 0.5],
+            "temperature_2m_max": [31.2, 30.5, 32.1, 29.8, 28.5, 31.0, 32.5],
+            "temperature_2m_min": [23.1, 22.8, 24.0, 22.5, 21.8, 23.5, 24.1],
+            "uv_index_max": [8.2, 7.5, 9.1, 6.8, 5.5, 8.0, 9.2],
+            "wind_speed_10m_max": [15.2, 12.8, 10.5, 18.3, 20.1, 14.5, 11.2],
+            "et0_fao_evapotranspiration": [4.2, 3.8, 4.5, 3.5, 3.2, 4.0, 4.8],
+        }
+    }
+
+def soil_moisture_status(val):
+    """Interpretasi nilai kelembaban tanah (m³/m³)."""
+    if val >= 0.40:   return "Jenuh 💦", "#3b82f6"
+    elif val >= 0.30: return "Basah 🌊", "#06b6d4"
+    elif val >= 0.20: return "Lembab 🌱", "#10b981"
+    elif val >= 0.10: return "Kering 🏜️", "#f59e0b"
+    else:             return "Sangat Kering ⚠️", "#ef4444"
+
+def uv_status(val):
+    """Interpretasi indeks UV."""
+    if val >= 11:   return "Ekstrem 🔴", "#ef4444"
+    elif val >= 8:  return "Sangat Tinggi 🟠", "#f97316"
+    elif val >= 6:  return "Tinggi 🟡", "#eab308"
+    elif val >= 3:  return "Sedang 🟢", "#22c55e"
+    else:           return "Rendah ✅", "#10b981"
+
 # ─── TELEGRAM ──────────────────────────────────────────────────────────────────
 last_alert_level = {"level": None, "time": datetime(2000, 1, 1, tzinfo=WIB)}
 
@@ -220,7 +289,9 @@ app.layout = html.Div([
     dcc.Interval(id="interval-realtime", interval=30_000, n_intervals=0),   # 30 detik
     dcc.Interval(id="interval-weather",  interval=300_000, n_intervals=0),  # 5 menit
     dcc.Store(id="store-weather"),
+    dcc.Store(id="store-openmeteo"),
     dcc.Store(id="store-alert-log", data=[]),
+    dcc.Interval(id="interval-openmeteo", interval=600_000, n_intervals=0),  # 10 menit
 
     # ── HEADER ─────────────────────────────────────────────────────────────────
     html.Div([
@@ -261,6 +332,137 @@ app.layout = html.Div([
             metric_card("fa-compress-arrows-alt","Tekanan",    "val-pressure", "hPa",    "#f59e0b"),
             metric_card("fa-eye",              "Visibilitas",  "val-vis",      "km",     "#10b981"),
         ], style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "marginBottom": "16px"}),
+
+        # ── ROW 1B: OPEN-METEO CARDS (Tanah & Lingkungan) ──────────────────────
+        html.Div([
+            # Suhu Tanah
+            html.Div([
+                html.Div("🌱 Suhu & Kelembaban Tanah", style={"fontSize": "12px", "color": "#94a3b8",
+                    "fontWeight": "600", "textTransform": "uppercase", "marginBottom": "10px"}),
+                html.Div([
+                    html.Div([
+                        html.Div("Permukaan (0cm)", style={"fontSize": "11px", "color": "#64748b"}),
+                        html.Span(id="val-soil-temp-0", style={"fontSize": "20px", "fontWeight": "700", "color": "#f97316"}),
+                        html.Span("°C", style={"fontSize": "12px", "color": "#64748b", "marginLeft": "3px"}),
+                    ], style={"flex": "1"}),
+                    html.Div([
+                        html.Div("Dalam (6cm)", style={"fontSize": "11px", "color": "#64748b"}),
+                        html.Span(id="val-soil-temp-6", style={"fontSize": "20px", "fontWeight": "700", "color": "#f59e0b"}),
+                        html.Span("°C", style={"fontSize": "12px", "color": "#64748b", "marginLeft": "3px"}),
+                    ], style={"flex": "1"}),
+                    html.Div([
+                        html.Div("Dalam (18cm)", style={"fontSize": "11px", "color": "#64748b"}),
+                        html.Span(id="val-soil-temp-18", style={"fontSize": "20px", "fontWeight": "700", "color": "#eab308"}),
+                        html.Span("°C", style={"fontSize": "12px", "color": "#64748b", "marginLeft": "3px"}),
+                    ], style={"flex": "1"}),
+                ], style={"display": "flex", "gap": "12px"}),
+            ], style={
+                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
+                "border": "1px solid #f97316 33", "borderRadius": "12px",
+                "padding": "16px 20px", "flex": "1", "minWidth": "260px",
+                "boxShadow": "0 4px 20px #f9731622",
+            }),
+            # Kelembaban Tanah
+            html.Div([
+                html.Div("💦 Kelembaban Tanah", style={"fontSize": "12px", "color": "#94a3b8",
+                    "fontWeight": "600", "textTransform": "uppercase", "marginBottom": "10px"}),
+                html.Div([
+                    html.Div([
+                        html.Div("0–1 cm", style={"fontSize": "11px", "color": "#64748b"}),
+                        html.Span(id="val-soil-moist-0", style={"fontSize": "18px", "fontWeight": "700", "color": "#38bdf8"}),
+                        html.Div(id="val-soil-moist-0-status", style={"fontSize": "10px", "marginTop": "2px"}),
+                    ], style={"flex": "1"}),
+                    html.Div([
+                        html.Div("1–3 cm", style={"fontSize": "11px", "color": "#64748b"}),
+                        html.Span(id="val-soil-moist-1", style={"fontSize": "18px", "fontWeight": "700", "color": "#06b6d4"}),
+                        html.Div(id="val-soil-moist-1-status", style={"fontSize": "10px", "marginTop": "2px"}),
+                    ], style={"flex": "1"}),
+                    html.Div([
+                        html.Div("3–9 cm", style={"fontSize": "11px", "color": "#64748b"}),
+                        html.Span(id="val-soil-moist-3", style={"fontSize": "18px", "fontWeight": "700", "color": "#3b82f6"}),
+                        html.Div(id="val-soil-moist-3-status", style={"fontSize": "10px", "marginTop": "2px"}),
+                    ], style={"flex": "1"}),
+                ], style={"display": "flex", "gap": "12px"}),
+            ], style={
+                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
+                "border": "1px solid #38bdf833", "borderRadius": "12px",
+                "padding": "16px 20px", "flex": "1", "minWidth": "260px",
+                "boxShadow": "0 4px 20px #38bdf822",
+            }),
+            # UV & Titik Embun
+            html.Div([
+                html.Div("☀️ Indeks UV & Atmosfer", style={"fontSize": "12px", "color": "#94a3b8",
+                    "fontWeight": "600", "textTransform": "uppercase", "marginBottom": "10px"}),
+                html.Div([
+                    html.Div([
+                        html.Div("Indeks UV", style={"fontSize": "11px", "color": "#64748b"}),
+                        html.Span(id="val-uv", style={"fontSize": "22px", "fontWeight": "700", "color": "#eab308"}),
+                        html.Div(id="val-uv-status", style={"fontSize": "10px", "marginTop": "2px"}),
+                    ], style={"flex": "1"}),
+                    html.Div([
+                        html.Div("Titik Embun", style={"fontSize": "11px", "color": "#64748b"}),
+                        html.Span(id="val-dewpoint", style={"fontSize": "22px", "fontWeight": "700", "color": "#a78bfa"}),
+                        html.Span("°C", style={"fontSize": "12px", "color": "#64748b", "marginLeft": "3px"}),
+                    ], style={"flex": "1"}),
+                    html.Div([
+                        html.Div("Tutupan Awan", style={"fontSize": "11px", "color": "#64748b"}),
+                        html.Span(id="val-cloud", style={"fontSize": "22px", "fontWeight": "700", "color": "#94a3b8"}),
+                        html.Span("%", style={"fontSize": "12px", "color": "#64748b", "marginLeft": "3px"}),
+                    ], style={"flex": "1"}),
+                ], style={"display": "flex", "gap": "12px"}),
+            ], style={
+                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
+                "border": "1px solid #eab30833", "borderRadius": "12px",
+                "padding": "16px 20px", "flex": "1", "minWidth": "260px",
+                "boxShadow": "0 4px 20px #eab30822",
+            }),
+            # Evapotranspirasi & Angin
+            html.Div([
+                html.Div("🌬️ Evapotranspirasi & Angin", style={"fontSize": "12px", "color": "#94a3b8",
+                    "fontWeight": "600", "textTransform": "uppercase", "marginBottom": "10px"}),
+                html.Div([
+                    html.Div([
+                        html.Div("Evapotranspirasi", style={"fontSize": "11px", "color": "#64748b"}),
+                        html.Span(id="val-et0", style={"fontSize": "22px", "fontWeight": "700", "color": "#10b981"}),
+                        html.Span("mm/hr", style={"fontSize": "11px", "color": "#64748b", "marginLeft": "3px"}),
+                    ], style={"flex": "1"}),
+                    html.Div([
+                        html.Div("Arah Angin", style={"fontSize": "11px", "color": "#64748b"}),
+                        html.Span(id="val-wind-dir", style={"fontSize": "22px", "fontWeight": "700", "color": "#8b5cf6"}),
+                        html.Div(id="val-wind-dir-label", style={"fontSize": "10px", "color": "#64748b", "marginTop": "2px"}),
+                    ], style={"flex": "1"}),
+                ], style={"display": "flex", "gap": "12px"}),
+            ], style={
+                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
+                "border": "1px solid #10b98133", "borderRadius": "12px",
+                "padding": "16px 20px", "flex": "1", "minWidth": "220px",
+                "boxShadow": "0 4px 20px #10b98122",
+            }),
+        ], style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "marginBottom": "16px"}),
+
+        # ── ROW 1C: GRAFIK PRAKIRAAN 7 HARI OPEN-METEO ──────────────────────
+        html.Div([
+            html.Div([
+                html.H3("📅 Prakiraan 7 Hari – Open-Meteo",
+                        style={"color": "#38bdf8", "margin": "0 0 12px", "fontSize": "15px", "fontWeight": "600"}),
+                dcc.Graph(id="chart-openmeteo-daily", config={"displayModeBar": False},
+                          style={"height": "220px"}),
+            ], style={
+                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
+                "border": "1px solid #1e40af33", "borderRadius": "12px",
+                "padding": "20px", "flex": "2",
+            }),
+            html.Div([
+                html.H3("🌱 Tren Kelembaban Tanah 24 Jam",
+                        style={"color": "#38bdf8", "margin": "0 0 12px", "fontSize": "15px", "fontWeight": "600"}),
+                dcc.Graph(id="chart-soil-moisture", config={"displayModeBar": False},
+                          style={"height": "220px"}),
+            ], style={
+                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
+                "border": "1px solid #1e40af33", "borderRadius": "12px",
+                "padding": "20px", "flex": "1", "minWidth": "300px",
+            }),
+        ], style={"display": "flex", "gap": "16px", "marginBottom": "16px", "flexWrap": "wrap"}),
 
         # ── ROW 2: KONDISI & MAP ────────────────────────────────────────────
         html.Div([
@@ -781,6 +983,168 @@ def handle_telegram(n_send, n_test, msg):
         return "✅ Terkirim!" if ok else "❌ Gagal kirim"
     return ""
 
+
+# ─── CALLBACK: UPDATE OPEN-METEO STORE ────────────────────────────────────────
+@app.callback(
+    Output("store-openmeteo", "data"),
+    Input("interval-openmeteo", "n_intervals"),
+)
+def update_openmeteo_store(_):
+    return fetch_openmeteo()
+
+# ─── CALLBACK: UPDATE OPEN-METEO CARDS ────────────────────────────────────────
+@app.callback(
+    [Output("val-soil-temp-0",      "children"),
+     Output("val-soil-temp-6",      "children"),
+     Output("val-soil-temp-18",     "children"),
+     Output("val-soil-moist-0",     "children"),
+     Output("val-soil-moist-0-status","children"),
+     Output("val-soil-moist-1",     "children"),
+     Output("val-soil-moist-1-status","children"),
+     Output("val-soil-moist-3",     "children"),
+     Output("val-soil-moist-3-status","children"),
+     Output("val-uv",               "children"),
+     Output("val-uv-status",        "children"),
+     Output("val-dewpoint",         "children"),
+     Output("val-cloud",            "children"),
+     Output("val-et0",              "children"),
+     Output("val-wind-dir",         "children"),
+     Output("val-wind-dir-label",   "children"),
+    ],
+    [Input("interval-openmeteo", "n_intervals"),
+     Input("store-openmeteo",    "data")],
+)
+def update_openmeteo_cards(_, data):
+    if not data:
+        data = fetch_openmeteo()
+    c = data.get("current", {})
+
+    st0  = c.get("soil_temperature_0cm",  28.0)
+    st6  = c.get("soil_temperature_6cm",  26.0)
+    st18 = c.get("soil_temperature_18cm", 25.0)
+    sm0  = c.get("soil_moisture_0_to_1cm", 0.30)
+    sm1  = c.get("soil_moisture_1_to_3cm", 0.32)
+    sm3  = c.get("soil_moisture_3_to_9cm", 0.35)
+    uv   = c.get("uv_index",       3.5)
+    dew  = c.get("dew_point_2m",   22.0)
+    cld  = c.get("cloud_cover",    75)
+    wdir = c.get("wind_direction_10m", 180)
+
+    # Evapotranspirasi dari daily hari ini
+    daily = data.get("daily", {})
+    et0_list = daily.get("et0_fao_evapotranspiration", [4.0])
+    et0 = et0_list[0] if et0_list else 4.0
+
+    # Status kelembaban tanah
+    sm0_txt,  sm0_clr  = soil_moisture_status(sm0)
+    sm1_txt,  sm1_clr  = soil_moisture_status(sm1)
+    sm3_txt,  sm3_clr  = soil_moisture_status(sm3)
+    uv_txt,   uv_clr   = uv_status(uv)
+
+    # Arah angin dalam teks
+    dirs = ["U","TL","T","TG","S","BD","B","BL"]
+    wind_label = dirs[int((wdir + 22.5) / 45) % 8]
+
+    def sm_span(txt, clr):
+        return html.Span(txt, style={"color": clr, "fontWeight": "600"})
+
+    return (
+        f"{st0:.1f}", f"{st6:.1f}", f"{st18:.1f}",
+        f"{sm0:.2f}", sm_span(sm0_txt, sm0_clr),
+        f"{sm1:.2f}", sm_span(sm1_txt, sm1_clr),
+        f"{sm3:.2f}", sm_span(sm3_txt, sm3_clr),
+        f"{uv:.1f}",  html.Span(uv_txt, style={"color": uv_clr, "fontWeight": "600"}),
+        f"{dew:.1f}", f"{cld}",
+        f"{et0:.1f}", f"{wdir:.0f}°",
+        html.Span(f"({wind_label})", style={"color": "#64748b"}),
+    )
+
+# ─── CALLBACK: GRAFIK PRAKIRAAN 7 HARI ────────────────────────────────────────
+@app.callback(
+    Output("chart-openmeteo-daily", "figure"),
+    Input("store-openmeteo", "data"),
+)
+def update_openmeteo_daily(data):
+    if not data:
+        data = fetch_openmeteo()
+    daily = data.get("daily", {})
+    times = daily.get("time", [])
+    ch    = daily.get("precipitation_sum", [])
+    tmax  = daily.get("temperature_2m_max", [])
+    tmin  = daily.get("temperature_2m_min", [])
+    uv    = daily.get("uv_index_max", [])
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=times, y=ch, name="CH (mm)", marker_color="#38bdf8",
+                         opacity=0.8, yaxis="y"))
+    fig.add_trace(go.Scatter(x=times, y=tmax, name="Suhu Maks °C",
+                             line=dict(color="#ef4444", width=2), yaxis="y2"))
+    fig.add_trace(go.Scatter(x=times, y=tmin, name="Suhu Min °C",
+                             line=dict(color="#3b82f6", width=2, dash="dot"), yaxis="y2"))
+    fig.add_trace(go.Scatter(x=times, y=uv, name="UV Maks",
+                             line=dict(color="#eab308", width=1.5, dash="dash"), yaxis="y3"))
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#94a3b8", size=10),
+        margin=dict(l=40, r=60, t=10, b=40),
+        xaxis=dict(showgrid=False),
+        yaxis=dict(title="mm", showgrid=True, gridcolor="#1e293b"),
+        yaxis2=dict(overlaying="y", side="right", showgrid=False, title="°C"),
+        yaxis3=dict(overlaying="y", side="right", showgrid=False,
+                    position=0.95, title="UV"),
+        barmode="overlay",
+        legend=dict(orientation="h", y=-0.3),
+        hovermode="x unified",
+    )
+    return fig
+
+# ─── CALLBACK: GRAFIK KELEMBABAN TANAH ────────────────────────────────────────
+# Buffer kelembaban tanah (simulasi tren 24 jam)
+soil_buffer = deque(maxlen=48)
+def _seed_soil():
+    for i in range(48, 0, -1):
+        t = now_wib() - timedelta(minutes=i * 30)
+        soil_buffer.append({
+            "time": t,
+            "sm0":  round(max(0.1, min(0.5, 0.35 + np.random.normal(0, 0.02))), 3),
+            "sm1":  round(max(0.1, min(0.5, 0.38 + np.random.normal(0, 0.02))), 3),
+            "sm3":  round(max(0.1, min(0.5, 0.40 + np.random.normal(0, 0.01))), 3),
+        })
+_seed_soil()
+
+@app.callback(
+    Output("chart-soil-moisture", "figure"),
+    Input("interval-openmeteo", "n_intervals"),
+)
+def update_soil_chart(_):
+    buf   = list(soil_buffer)
+    times = [b["time"] for b in buf]
+    sm0   = [b["sm0"]  for b in buf]
+    sm1   = [b["sm1"]  for b in buf]
+    sm3   = [b["sm3"]  for b in buf]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=times, y=sm0, name="0–1 cm",
+                             line=dict(color="#38bdf8", width=2), fill="tozeroy",
+                             fillcolor="rgba(56,189,248,0.1)"))
+    fig.add_trace(go.Scatter(x=times, y=sm1, name="1–3 cm",
+                             line=dict(color="#06b6d4", width=2)))
+    fig.add_trace(go.Scatter(x=times, y=sm3, name="3–9 cm",
+                             line=dict(color="#3b82f6", width=2)))
+    # Garis batas jenuh
+    fig.add_hline(y=0.40, line_dash="dash", line_color="#ef4444",
+                  annotation_text="Jenuh", annotation_font_color="#ef4444", line_width=1)
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#94a3b8", size=10),
+        margin=dict(l=40, r=20, t=10, b=40),
+        xaxis=dict(showgrid=False, tickformat="%H:%M"),
+        yaxis=dict(title="m³/m³", showgrid=True, gridcolor="#1e293b",
+                   range=[0, 0.55]),
+        legend=dict(orientation="h", y=-0.3),
+        hovermode="x unified",
+    )
+    return fig
 
 # ─── SERVER EXPORT (wajib untuk Gunicorn / Render.com) ────────────────────────
 server = app.server   # <── baris ini yang dibaca Gunicorn
