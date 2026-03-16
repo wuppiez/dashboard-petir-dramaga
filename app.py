@@ -12,11 +12,18 @@ import pandas as pd
 import numpy as np
 import requests
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import threading
 import time
 from collections import deque
 import os
+
+# ─── TIMEZONE WIB (UTC+7) ──────────────────────────────────────────────────────
+WIB = timezone(timedelta(hours=7))
+
+def now_wib():
+    """Ambil waktu sekarang dalam WIB (UTC+7)."""
+    return datetime.now(timezone.utc).astimezone(WIB)
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "YOUR_OPENWEATHER_API_KEY")
@@ -51,7 +58,7 @@ df_hist = load_historical()
 # (Ganti dengan sensor / API aktual di produksi)
 realtime_buffer = deque(maxlen=288)   # 24 jam x 12 (5-menit interval)
 def _seed_realtime():
-    now = datetime.now()
+    now = now_wib()
     for i in range(288, 0, -1):
         ts  = now - timedelta(minutes=i * 5)
         val = max(0, np.random.normal(5, 8))
@@ -91,7 +98,7 @@ def fetch_forecast():
     # Demo fallback: 5-hari (3-jam interval)
     items = []
     for i in range(40):
-        dt  = datetime.now() + timedelta(hours=i * 3)
+        dt  = now_wib() + timedelta(hours=i * 3)
         ch  = max(0, np.random.normal(3, 5))
         tmp = 24 + 5 * np.sin(i / 8)
         items.append({"dt_txt": dt.strftime("%Y-%m-%d %H:%M:%S"),
@@ -100,7 +107,7 @@ def fetch_forecast():
     return {"list": items}
 
 # ─── TELEGRAM ──────────────────────────────────────────────────────────────────
-last_alert_level = {"level": None, "time": datetime.min}
+last_alert_level = {"level": None, "time": datetime(2000, 1, 1, tzinfo=WIB)}
 
 def send_telegram(message: str) -> bool:
     try:
@@ -114,7 +121,7 @@ def send_telegram(message: str) -> bool:
 
 def check_and_alert(rainfall_1h: float):
     global last_alert_level
-    now = datetime.now()
+    now = now_wib()
     level = None
     emoji = ""
 
@@ -475,7 +482,7 @@ def update_metrics(_, weather, alert_log):
     if alert_log is None:
         alert_log = []
 
-    now_str = datetime.now().strftime("%A, %d %b %Y  %H:%M:%S WIB")
+    now_str = now_wib().strftime("%A, %d %b %Y  %H:%M:%S WIB")
     temp    = weather["main"]["temp"]
     hum     = weather["main"]["humidity"]
     fl      = weather["main"]["feels_like"]
@@ -487,7 +494,7 @@ def update_metrics(_, weather, alert_log):
 
     # Update realtime buffer
     realtime_buffer.append({
-        "time": datetime.now(),
+        "time": now_wib(),
         "rainfall_mm": round(rain1h, 2),
     })
 
@@ -497,15 +504,15 @@ def update_metrics(_, weather, alert_log):
     if rain1h >= THRESHOLD["AWAS"]:
         level_color, level_text = "#ef4444", "⚠️ AWAS"
         check_and_alert(rain1h)
-        alert_log.append({"time": datetime.now().strftime("%H:%M"), "level": "AWAS", "rain": rain1h})
+        alert_log.append({"time": now_wib().strftime("%H:%M"), "level": "AWAS", "rain": rain1h})
     elif rain1h >= THRESHOLD["SIAGA"]:
         level_color, level_text = "#f97316", "⚠️ SIAGA"
         check_and_alert(rain1h)
-        alert_log.append({"time": datetime.now().strftime("%H:%M"), "level": "SIAGA", "rain": rain1h})
+        alert_log.append({"time": now_wib().strftime("%H:%M"), "level": "SIAGA", "rain": rain1h})
     elif rain1h >= THRESHOLD["WASPADA"]:
         level_color, level_text = "#eab308", "⚡ WASPADA"
         check_and_alert(rain1h)
-        alert_log.append({"time": datetime.now().strftime("%H:%M"), "level": "WASPADA", "rain": rain1h})
+        alert_log.append({"time": now_wib().strftime("%H:%M"), "level": "WASPADA", "rain": rain1h})
 
     badge = html.Span(level_text, style={
         "background": level_color + "22",
@@ -754,7 +761,7 @@ def handle_telegram(n_send, n_test, msg):
         ok = send_telegram(
             f"✅ <b>Tes Koneksi Berhasil</b>\n"
             f"📍 {LOCATION_NAME}\n"
-            f"🕐 {datetime.now().strftime('%d %b %Y %H:%M WIB')}\n"
+            f"🕐 {now_wib().strftime('%d %b %Y %H:%M WIB')}\n"
             f"Dashboard berfungsi normal."
         )
         return "✅ Koneksi OK!" if ok else "❌ Gagal – cek token/chat ID"
