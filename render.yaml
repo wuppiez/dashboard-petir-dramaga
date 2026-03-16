@@ -4,7 +4,7 @@ services:
     env: python
     region: singapore
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:server --bind 0.0.0.0:$PORT
+    startCommand: gunicorn app:server --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 --preload
     envVars:
       - key: OPENWEATHER_API_KEY
         value: isi_api_key_openweathermap_disini
@@ -14,3 +14,7 @@ services:
         value: isi_chat_id_disini
       - key: TZ
         value: Asia/Jakarta
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PORT
+        value: "10000"
