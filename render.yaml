@@ -12,3 +12,5 @@ services:
         value: isi_token_bot_telegram_disini
       - key: TELEGRAM_CHAT_ID
         value: isi_chat_id_disini
+      - key: TZ
+        value: Asia/Jakarta
