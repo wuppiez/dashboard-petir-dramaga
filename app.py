@@ -876,7 +876,7 @@ def _handle_tg_command(chat_id, text):
     else:
         _tg_send(chat_id, "❓ Perintah tidak dikenali. Ketik /help untuk daftar perintah.")
 
-@server.route(f"/webhook/{TELEGRAM_BOT_TOKEN}", methods=["POST"])
+@server.route("/telegram", methods=["POST"])
 def telegram_webhook():
     try:
         data    = flask_request.get_json(force=True)
