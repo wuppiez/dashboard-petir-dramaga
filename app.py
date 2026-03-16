@@ -159,6 +159,129 @@ def fetch_openmeteo():
         }
     }
 
+# ─── BMKG API ─────────────────────────────────────────────────────────────────
+# Kode wilayah BMKG: Kecamatan Dramaga, Kabupaten Bogor
+BMKG_AREA_CODE = "501212"  # Kode adm4 Dramaga
+
+def fetch_bmkg():
+    """Ambil prakiraan cuaca BMKG untuk Kecamatan Dramaga."""
+    try:
+        url = f"https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={BMKG_AREA_CODE}"
+        r   = requests.get(url, timeout=8)
+        if r.status_code == 200:
+            data = r.json()
+            # Ambil data cuaca terkini (index 0 = periode terdekat)
+            lokasi = data.get("data", [{}])[0]
+            cuaca  = lokasi.get("cuaca", [[]])[0]
+            if cuaca:
+                item = cuaca[0]
+                return {
+                    "temp":     item.get("t",   27.0),
+                    "humidity": item.get("hu",  80.0),
+                    "wind_speed":  item.get("ws", 5.0),
+                    "wind_dir":    item.get("wd", "S"),
+                    "weather_desc": item.get("weather_desc", "Berawan"),
+                    "rain_intensity": item.get("rain_intensity", "-"),
+                    "source": "BMKG",
+                    "ok": True,
+                }
+    except Exception as e:
+        print(f"BMKG error: {e}")
+    # Fallback
+    return {
+        "temp": 27.8, "humidity": 83.0,
+        "wind_speed": 6.2, "wind_dir": "S",
+        "weather_desc": "Berawan (fallback)",
+        "rain_intensity": "-",
+        "source": "BMKG", "ok": False,
+    }
+
+# ─── DATA FUSION ENGINE ────────────────────────────────────────────────────────
+# Bobot tiap sumber (total harus = 1.0)
+WEIGHTS = {
+    "bmkg":  0.50,   # Paling lokal (stasiun Bogor)
+    "owm":   0.30,   # Real-time akurat
+    "meteo": 0.20,   # Model numerik global
+}
+
+def wind_dir_to_deg(d):
+    """Konversi arah angin BMKG (string) ke derajat."""
+    mapping = {
+        "N":0,"NNE":22.5,"NE":45,"ENE":67.5,
+        "E":90,"ESE":112.5,"SE":135,"SSE":157.5,
+        "S":180,"SSW":202.5,"SW":225,"WSW":247.5,
+        "W":270,"WNW":292.5,"NW":315,"NNW":337.5,
+        "U":0,"TL":45,"T":90,"TG":135,
+        "BD":225,"B":270,"BL":315,
+        "TENGGARA":135,"BARAT DAYA":225,"BARAT LAUT":315,
+        "UTARA":0,"SELATAN":180,"TIMUR":90,"BARAT":270,
+        "VARIABLE":0,"VAR":0,"-":0,
+    }
+    return mapping.get(str(d).upper().strip(), 0)
+
+def weighted_avg(values, weights):
+    """Hitung weighted average, skip nilai None."""
+    total_w, total_v = 0, 0
+    for v, w in zip(values, weights):
+        if v is not None:
+            total_v += v * w
+            total_w += w
+    return round(total_v / total_w, 2) if total_w > 0 else None
+
+def fuse_data(owm_data, meteo_data, bmkg_data):
+    """
+    Gabungkan data dari 3 sumber dengan weighted average.
+    Return dict berisi nilai fused + breakdown per sumber.
+    """
+    # Ekstrak nilai dari masing-masing sumber
+    owm_temp    = owm_data.get("main", {}).get("temp")
+    owm_hum     = owm_data.get("main", {}).get("humidity")
+    owm_rain    = owm_data.get("rain", {}).get("1h", 0)
+    owm_wind    = owm_data.get("wind", {}).get("speed")
+    owm_pres    = owm_data.get("main", {}).get("pressure")
+    owm_wdir    = owm_data.get("wind", {}).get("deg", 0)
+
+    mc          = meteo_data.get("current", {})
+    met_temp    = mc.get("temperature_2m")
+    met_hum     = mc.get("relative_humidity_2m")
+    met_rain    = mc.get("precipitation", 0)
+    met_wind    = mc.get("wind_speed_10m", 0) / 3.6  # km/h → m/s
+    met_pres    = mc.get("surface_pressure")
+    met_wdir    = mc.get("wind_direction_10m", 0)
+
+    bmkg_temp   = bmkg_data.get("temp")
+    bmkg_hum    = bmkg_data.get("humidity")
+    bmkg_rain   = 0  # BMKG tidak beri nilai numerik CH
+    bmkg_wind   = bmkg_data.get("wind_speed", 0) / 3.6  # km/h → m/s
+    bmkg_pres   = None  # BMKG tidak sediakan tekanan
+    bmkg_wdir   = wind_dir_to_deg(bmkg_data.get("wind_dir", "S"))
+
+    W = [WEIGHTS["bmkg"], WEIGHTS["owm"], WEIGHTS["meteo"]]
+
+    fused = {
+        "temp":     weighted_avg([bmkg_temp, owm_temp, met_temp],   W),
+        "humidity": weighted_avg([bmkg_hum,  owm_hum,  met_hum],    W),
+        "rain":     weighted_avg([bmkg_rain, owm_rain, met_rain],    [0, 0.5, 0.5]),  # OWM+Meteo saja
+        "wind":     weighted_avg([bmkg_wind, owm_wind, met_wind],    W),
+        "pressure": weighted_avg([bmkg_pres, owm_pres, met_pres],    [0, 0.5, 0.5]),
+        "wind_dir": weighted_avg([bmkg_wdir, owm_wdir, met_wdir],    W),
+        # Breakdown per sumber untuk ditampilkan di dashboard
+        "breakdown": {
+            "temp":     {"BMKG": bmkg_temp,  "OpenWeather": owm_temp, "Open-Meteo": met_temp},
+            "humidity": {"BMKG": bmkg_hum,   "OpenWeather": owm_hum,  "Open-Meteo": met_hum},
+            "rain":     {"BMKG": bmkg_rain,  "OpenWeather": owm_rain, "Open-Meteo": met_rain},
+            "wind":     {"BMKG": bmkg_wind,  "OpenWeather": owm_wind, "Open-Meteo": met_wind},
+        },
+        "bmkg_desc":   bmkg_data.get("weather_desc", "-"),
+        "bmkg_ok":     bmkg_data.get("ok", False),
+        "sources_ok":  sum([
+            1 if bmkg_data.get("ok") else 0,
+            1 if owm_temp else 0,
+            1 if met_temp else 0,
+        ]),
+    }
+    return fused
+
 def soil_moisture_status(val):
     """Interpretasi nilai kelembaban tanah (m³/m³)."""
     if val >= 0.40:   return "Jenuh 💦", "#3b82f6"
@@ -290,7 +413,10 @@ app.layout = html.Div([
     dcc.Interval(id="interval-weather",  interval=300_000, n_intervals=0),  # 5 menit
     dcc.Store(id="store-weather"),
     dcc.Store(id="store-openmeteo"),
+    dcc.Store(id="store-bmkg"),
+    dcc.Store(id="store-fused"),
     dcc.Store(id="store-alert-log", data=[]),
+    dcc.Interval(id="interval-bmkg", interval=1_800_000, n_intervals=0),  # 30 menit
     dcc.Interval(id="interval-openmeteo", interval=600_000, n_intervals=0),  # 10 menit
 
     # ── HEADER ─────────────────────────────────────────────────────────────────
@@ -332,6 +458,100 @@ app.layout = html.Div([
             metric_card("fa-compress-arrows-alt","Tekanan",    "val-pressure", "hPa",    "#f59e0b"),
             metric_card("fa-eye",              "Visibilitas",  "val-vis",      "km",     "#10b981"),
         ], style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "marginBottom": "16px"}),
+
+        # ── ROW FUSION: DATA FUSION PANEL ──────────────────────────────────────────
+        html.Div([
+            html.Div([
+                # Header fusion
+                html.Div([
+                    html.Div([
+                        html.Span("🔀 Data Fusion Engine",
+                                  style={"fontSize": "14px", "fontWeight": "700", "color": "#38bdf8"}),
+                        html.Span(" — Weighted Average (BMKG 50% · OpenWeather 30% · Open-Meteo 20%)",
+                                  style={"fontSize": "11px", "color": "#64748b"}),
+                    ]),
+                    html.Div(id="fusion-sources-badge"),
+                ], style={"display": "flex", "justifyContent": "space-between",
+                          "alignItems": "center", "marginBottom": "14px", "flexWrap": "wrap", "gap": "8px"}),
+                # Fusion metric cards
+                html.Div([
+                    # Suhu
+                    html.Div([
+                        html.Div("🌡️ Suhu Udara", style={"fontSize": "11px", "color": "#94a3b8",
+                            "textTransform": "uppercase", "marginBottom": "4px"}),
+                        html.Div([
+                            html.Span(id="fused-temp",
+                                      style={"fontSize": "28px", "fontWeight": "800", "color": "#f1f5f9"}),
+                            html.Span("°C", style={"fontSize": "14px", "color": "#64748b", "marginLeft": "4px"}),
+                        ]),
+                        html.Div(id="fused-temp-breakdown",
+                                 style={"marginTop": "8px", "fontSize": "10px"}),
+                    ], style={"flex": "1", "minWidth": "140px", "padding": "12px",
+                              "background": "#0f172a", "borderRadius": "10px",
+                              "border": "1px solid #ef444433"}),
+                    # Kelembaban
+                    html.Div([
+                        html.Div("💧 Kelembaban", style={"fontSize": "11px", "color": "#94a3b8",
+                            "textTransform": "uppercase", "marginBottom": "4px"}),
+                        html.Div([
+                            html.Span(id="fused-humidity",
+                                      style={"fontSize": "28px", "fontWeight": "800", "color": "#f1f5f9"}),
+                            html.Span("%", style={"fontSize": "14px", "color": "#64748b", "marginLeft": "4px"}),
+                        ]),
+                        html.Div(id="fused-humidity-breakdown",
+                                 style={"marginTop": "8px", "fontSize": "10px"}),
+                    ], style={"flex": "1", "minWidth": "140px", "padding": "12px",
+                              "background": "#0f172a", "borderRadius": "10px",
+                              "border": "1px solid #3b82f633"}),
+                    # CH
+                    html.Div([
+                        html.Div("🌧️ Curah Hujan", style={"fontSize": "11px", "color": "#94a3b8",
+                            "textTransform": "uppercase", "marginBottom": "4px"}),
+                        html.Div([
+                            html.Span(id="fused-rain",
+                                      style={"fontSize": "28px", "fontWeight": "800", "color": "#f1f5f9"}),
+                            html.Span("mm/jam", style={"fontSize": "11px", "color": "#64748b", "marginLeft": "4px"}),
+                        ]),
+                        html.Div(id="fused-rain-breakdown",
+                                 style={"marginTop": "8px", "fontSize": "10px"}),
+                    ], style={"flex": "1", "minWidth": "140px", "padding": "12px",
+                              "background": "#0f172a", "borderRadius": "10px",
+                              "border": "1px solid #06b6d433"}),
+                    # Angin
+                    html.Div([
+                        html.Div("💨 Kec. Angin", style={"fontSize": "11px", "color": "#94a3b8",
+                            "textTransform": "uppercase", "marginBottom": "4px"}),
+                        html.Div([
+                            html.Span(id="fused-wind",
+                                      style={"fontSize": "28px", "fontWeight": "800", "color": "#f1f5f9"}),
+                            html.Span("m/s", style={"fontSize": "11px", "color": "#64748b", "marginLeft": "4px"}),
+                        ]),
+                        html.Div(id="fused-wind-breakdown",
+                                 style={"marginTop": "8px", "fontSize": "10px"}),
+                    ], style={"flex": "1", "minWidth": "140px", "padding": "12px",
+                              "background": "#0f172a", "borderRadius": "10px",
+                              "border": "1px solid #8b5cf633"}),
+                    # Kondisi BMKG
+                    html.Div([
+                        html.Div("📡 Kondisi BMKG", style={"fontSize": "11px", "color": "#94a3b8",
+                            "textTransform": "uppercase", "marginBottom": "4px"}),
+                        html.Div(id="fused-bmkg-desc",
+                                 style={"fontSize": "14px", "fontWeight": "700",
+                                        "color": "#38bdf8", "lineHeight": "1.4"}),
+                        html.Div("Sumber: BMKG Dramaga",
+                                 style={"fontSize": "10px", "color": "#475569", "marginTop": "6px"}),
+                    ], style={"flex": "1", "minWidth": "140px", "padding": "12px",
+                              "background": "#0f172a", "borderRadius": "10px",
+                              "border": "1px solid #10b98133"}),
+                ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap"}),
+            ], style={
+                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
+                "border": "2px solid #1d4ed8",
+                "borderRadius": "12px",
+                "padding": "20px",
+                "boxShadow": "0 4px 24px rgba(29,78,216,0.25)",
+            }),
+        ], style={"marginBottom": "16px"}),
 
         # ── ROW 1B: OPEN-METEO CARDS (Tanah & Lingkungan) ──────────────────────
         html.Div([
@@ -983,6 +1203,107 @@ def handle_telegram(n_send, n_test, msg):
         return "✅ Terkirim!" if ok else "❌ Gagal kirim"
     return ""
 
+
+# ─── CALLBACK: UPDATE BMKG STORE ─────────────────────────────────────────────
+@app.callback(
+    Output("store-bmkg", "data"),
+    Input("interval-bmkg", "n_intervals"),
+)
+def update_bmkg_store(_):
+    return fetch_bmkg()
+
+# ─── CALLBACK: UPDATE FUSED STORE ─────────────────────────────────────────────
+@app.callback(
+    Output("store-fused", "data"),
+    [Input("store-weather",  "data"),
+     Input("store-openmeteo","data"),
+     Input("store-bmkg",     "data")],
+)
+def update_fused_store(owm, meteo, bmkg):
+    if not owm:   owm   = fetch_weather()
+    if not meteo: meteo = fetch_openmeteo()
+    if not bmkg:  bmkg  = fetch_bmkg()
+    return fuse_data(owm, meteo, bmkg)
+
+# ─── CALLBACK: TAMPILKAN FUSION PANEL ─────────────────────────────────────────
+def breakdown_bar(label, value, color, unit=""):
+    """Buat mini bar untuk breakdown per sumber."""
+    if value is None:
+        return html.Div(f"{label}: N/A",
+                        style={"color": "#475569", "marginBottom": "2px"})
+    max_val = 100 if unit == "%" else (10 if unit == "m/s" else 40)
+    pct = min(100, max(0, (value / max_val) * 100))
+    return html.Div([
+        html.Span(f"{label}: ", style={"color": "#64748b", "minWidth": "80px", "display": "inline-block"}),
+        html.Span(f"{value:.1f}{unit} ", style={"color": color, "fontWeight": "600"}),
+        html.Div(
+            html.Div(style={
+                "width": f"{pct}%", "height": "4px",
+                "background": color, "borderRadius": "2px",
+            }),
+            style={"display": "inline-block", "width": "60px",
+                   "background": "#1e293b", "borderRadius": "2px",
+                   "verticalAlign": "middle"},
+        ),
+    ], style={"marginBottom": "3px", "display": "flex", "alignItems": "center", "gap": "4px"})
+
+@app.callback(
+    [Output("fused-temp",              "children"),
+     Output("fused-humidity",          "children"),
+     Output("fused-rain",              "children"),
+     Output("fused-wind",              "children"),
+     Output("fused-bmkg-desc",         "children"),
+     Output("fused-temp-breakdown",    "children"),
+     Output("fused-humidity-breakdown","children"),
+     Output("fused-rain-breakdown",    "children"),
+     Output("fused-wind-breakdown",    "children"),
+     Output("fusion-sources-badge",    "children"),
+    ],
+    Input("store-fused", "data"),
+)
+def update_fusion_panel(fused):
+    if not fused:
+        fused = fuse_data(fetch_weather(), fetch_openmeteo(), fetch_bmkg())
+
+    temp  = fused.get("temp",     27.5)
+    hum   = fused.get("humidity", 80.0)
+    rain  = fused.get("rain",     0.0)
+    wind  = fused.get("wind",     2.0)
+    desc  = fused.get("bmkg_desc", "-")
+    bd    = fused.get("breakdown", {})
+    n_ok  = fused.get("sources_ok", 0)
+
+    # Warna badge sumber
+    badge_color = "#22c55e" if n_ok == 3 else "#f59e0b" if n_ok == 2 else "#ef4444"
+    badge = html.Span(
+        f"✅ {n_ok}/3 Sumber Aktif",
+        style={"background": badge_color + "22", "color": badge_color,
+               "border": f"1px solid {badge_color}", "borderRadius": "6px",
+               "padding": "2px 10px", "fontSize": "11px", "fontWeight": "700"},
+    )
+
+    # Breakdown bars
+    def make_bd(param, unit, color_map):
+        items = bd.get(param, {})
+        return html.Div([
+            breakdown_bar(src, val, color_map.get(src, "#94a3b8"), unit)
+            for src, val in items.items()
+        ])
+
+    cm_temp = {"BMKG": "#f97316", "OpenWeather": "#ef4444", "Open-Meteo": "#f59e0b"}
+    cm_hum  = {"BMKG": "#3b82f6", "OpenWeather": "#06b6d4", "Open-Meteo": "#8b5cf6"}
+    cm_rain = {"BMKG": "#64748b", "OpenWeather": "#38bdf8", "Open-Meteo": "#0ea5e9"}
+    cm_wind = {"BMKG": "#a78bfa", "OpenWeather": "#8b5cf6", "Open-Meteo": "#7c3aed"}
+
+    return (
+        f"{temp:.1f}", f"{hum:.0f}", f"{rain:.1f}", f"{wind:.1f}",
+        desc,
+        make_bd("temp",     "°C",   cm_temp),
+        make_bd("humidity", "%",    cm_hum),
+        make_bd("rain",     "mm",   cm_rain),
+        make_bd("wind",     "m/s",  cm_wind),
+        badge,
+    )
 
 # ─── CALLBACK: UPDATE OPEN-METEO STORE ────────────────────────────────────────
 @app.callback(
