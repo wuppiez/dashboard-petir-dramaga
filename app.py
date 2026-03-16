@@ -779,3 +779,116 @@ server = app.server   # <── baris ini yang dibaca Gunicorn
 # ─── RUN ───────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=8050)
+
+# ─── TELEGRAM WEBHOOK ROUTE ────────────────────────────────────────────────────
+from flask import request as flask_request, jsonify
+
+def _tg_send(chat_id, text):
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            data={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+            timeout=10,
+        )
+    except Exception as e:
+        print(f"Telegram send error: {e}")
+
+def _tg_get_weather():
+    try:
+        url = (f"https://api.openweathermap.org/data/2.5/weather"
+               f"?lat={LAT}&lon={LON}&appid={OPENWEATHER_API_KEY}&units=metric&lang=id")
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return None
+
+def _handle_tg_command(chat_id, text):
+    text = text.strip().lower().split("@")[0]
+    if text in ("/start", "/help"):
+        _tg_send(chat_id,
+            "🌧️ <b>Bot Hidrometeorologi – Desa Petir</b>\n\n"
+            "/status  – Status cuaca &amp; level peringatan\n"
+            "/cuaca   – Info cuaca lengkap\n"
+            "/hujan   – Curah hujan hari ini\n"
+            "/ekstrem – 5 event hujan terbesar\n"
+            "/tren    – Tren tahunan ringkasan\n"
+            "/help    – Tampilkan menu ini"
+        )
+    elif text == "/status":
+        w = _tg_get_weather()
+        if not w:
+            _tg_send(chat_id, "❌ Gagal mengambil data cuaca.")
+            return
+        temp  = w["main"]["temp"]
+        hum   = w["main"]["humidity"]
+        desc  = w["weather"][0]["description"].capitalize()
+        rain  = w.get("rain", {}).get("1h", 0)
+        now   = now_wib().strftime("%d %b %Y %H:%M WIB")
+        level, emoji = "NORMAL", "🟢"
+        if rain >= 150:   level, emoji = "AWAS",    "🔴"
+        elif rain >= 100: level, emoji = "SIAGA",   "🟠"
+        elif rain >= 50:  level, emoji = "WASPADA", "🟡"
+        _tg_send(chat_id,
+            f"{emoji} <b>Status: {level}</b>\n📍 {LOCATION_NAME}\n🕐 {now}\n"
+            f"🌡️ {temp:.1f}°C | 💧 {hum}%\n🌤️ {desc}\n🌧️ CH: <b>{rain:.1f} mm/jam</b>"
+        )
+    elif text == "/cuaca":
+        w = _tg_get_weather()
+        if not w:
+            _tg_send(chat_id, "❌ Gagal mengambil data cuaca.")
+            return
+        _tg_send(chat_id,
+            f"🌤 <b>Cuaca Lengkap – Desa Petir</b>\n━━━━━━━━━━━━━━━━\n"
+            f"🌡️ Suhu        : {w['main']['temp']:.1f}°C\n"
+            f"🤔 Terasa      : {w['main']['feels_like']:.1f}°C\n"
+            f"💧 Kelembapan  : {w['main']['humidity']}%\n"
+            f"🌬️ Angin       : {w['wind']['speed']:.1f} m/s\n"
+            f"🔵 Tekanan     : {w['main']['pressure']} hPa\n"
+            f"👁️ Visibilitas : {w.get('visibility',10000)/1000:.1f} km\n"
+            f"🌧️ CH 1 jam    : {w.get('rain',{}).get('1h',0):.1f} mm\n"
+            f"🌤️ Kondisi     : {w['weather'][0]['description'].capitalize()}"
+        )
+    elif text == "/hujan":
+        today = now_wib().date()
+        today_data = df_hist[df_hist["date"].dt.date == today]
+        if today_data.empty:
+            last = df_hist.iloc[-1]
+            _tg_send(chat_id,
+                f"📅 Data hari ini belum tersedia.\n"
+                f"Data terakhir ({last['date'].strftime('%d %b %Y')}): {last['rainfall']:.1f} mm"
+            )
+        else:
+            _tg_send(chat_id, f"🌧️ Curah hujan hari ini: <b>{today_data['rainfall'].sum():.1f} mm</b>")
+    elif text == "/ekstrem":
+        top5 = df_hist.nlargest(5, "rainfall")[["date", "rainfall"]]
+        rows = ["⛈️ <b>5 Event Hujan Terbesar (2005–2025)</b>", "━━━━━━━━━━━━━━━━"]
+        for i, row in enumerate(top5.itertuples(), 1):
+            rows.append(f"{i}. {row.date.strftime('%d %b %Y')} – <b>{row.rainfall:.1f} mm</b>")
+        _tg_send(chat_id, "\n".join(rows))
+    elif text == "/tren":
+        annual = df_hist.groupby(df_hist["date"].dt.year)["rainfall"].agg(["sum","max","mean"])
+        rows = ["📊 <b>Tren CH Tahunan (5 tahun terakhir)</b>", "━━━━━━━━━━━━━━━━"]
+        for yr, row in annual.tail(5).iterrows():
+            rows.append(f"📅 {yr} | Total: {row['sum']:.0f}mm | Maks: {row['max']:.0f}mm | Avg: {row['mean']:.1f}mm")
+        _tg_send(chat_id, "\n".join(rows))
+    else:
+        _tg_send(chat_id, "❓ Perintah tidak dikenali. Ketik /help untuk daftar perintah.")
+
+@server.route(f"/webhook/{TELEGRAM_BOT_TOKEN}", methods=["POST"])
+def telegram_webhook():
+    try:
+        data    = flask_request.get_json(force=True)
+        msg_obj = data.get("message", {})
+        chat_id = msg_obj.get("chat", {}).get("id")
+        text    = msg_obj.get("text", "")
+        if chat_id and text:
+            _handle_tg_command(chat_id, text)
+    except Exception as e:
+        print(f"Webhook error: {e}")
+    return jsonify({"ok": True})
+
+@server.route("/ping")
+def ping():
+    return "pong", 200
