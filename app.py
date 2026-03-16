@@ -111,12 +111,21 @@ last_alert_level = {"level": None, "time": datetime(2000, 1, 1, tzinfo=WIB)}
 
 def send_telegram(message: str) -> bool:
     try:
+        if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
+            print("ERROR: TELEGRAM_BOT_TOKEN belum diisi di Render!")
+            return False
+        if not TELEGRAM_CHAT_ID or TELEGRAM_CHAT_ID == "YOUR_TELEGRAM_CHAT_ID":
+            print("ERROR: TELEGRAM_CHAT_ID belum diisi di Render!")
+            return False
         url  = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
         r    = requests.post(url, data=data, timeout=10)
-        return r.status_code == 200
+        if r.status_code != 200:
+            print(f"ERROR Telegram API {r.status_code}: {r.text}")
+            return False
+        return True
     except Exception as e:
-        print(f"Telegram error: {e}")
+        print(f"ERROR Telegram exception: {e}")
         return False
 
 def check_and_alert(rainfall_1h: float):
