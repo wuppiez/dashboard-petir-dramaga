@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: dashboard-petir-dramaga
+    env: python
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:server --bind 0.0.0.0:$PORT
+    envVars:
+      - key: OPENWEATHER_API_KEY
+        value: isi_api_key_openweathermap_disini
+      - key: TELEGRAM_BOT_TOKEN
+        value: isi_token_bot_telegram_disini
+      - key: TELEGRAM_CHAT_ID
+        value: isi_chat_id_disini
