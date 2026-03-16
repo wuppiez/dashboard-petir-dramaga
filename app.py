@@ -766,6 +766,9 @@ def handle_telegram(n_send, n_test, msg):
     return ""
 
 
+# ─── SERVER EXPORT (wajib untuk Gunicorn / Render.com) ────────────────────────
+server = app.server   # <── baris ini yang dibaca Gunicorn
+
 # ─── RUN ───────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=8050)
+    app.run(debug=False, host="0.0.0.0", port=8050)
