@@ -72,6 +72,26 @@ THRESHOLD = {
     "AWAS":     150,   # >150 mm/hari
 }
 
+# ─── LOAD GEOJSON BATAS DESA PETIR ───────────────────────────────────────────
+# Sumber: BIG – Batas Wilayah Kelurahan/Desa 10K, Delineasi 2017
+# Kode: 32.01.30.2005 (Desa Petir, Kec. Dramaga, Kab. Bogor)
+import json as _json
+
+def load_desa_geojson():
+    """Load file GeoJSON batas Desa Petir dari BIG."""
+    try:
+        with open("desapetir.json", "r", encoding="utf-8") as f:
+            data = _json.load(f)
+        print(f"✅ GeoJSON Desa Petir loaded: "
+              f"{len(data.get('features', []))} feature, "
+              f"luas 4.27 km²")
+        return data
+    except Exception as e:
+        print(f"⚠️  GeoJSON tidak ditemukan: {e}")
+        return None
+
+DESA_GEOJSON = load_desa_geojson()
+
 # ─── LOAD HISTORICAL DATA ──────────────────────────────────────────────────────
 def load_historical():
     df = pd.read_csv(DATA_FILE, parse_dates=["date"])
@@ -1696,64 +1716,72 @@ def load_map_data(_):
 # ─── CALLBACK: RENDER BATAS DESA DI PETA ──────────────────────────────────────
 @app.callback(
     Output("layer-batas-desa", "children"),
-    [Input("store-map-layers",  "data"),
-     Input("btn-layer-desa",    "n_clicks")],
+    Input("btn-layer-desa", "n_clicks"),
 )
-def render_batas_desa(map_data, n_desa):
+def render_batas_desa(n_desa):
+    """
+    Render batas Desa Petir dari file GeoJSON resmi BIG.
+    Sumber: © BIG – Batas Wilayah Kelurahan/Desa 10K (2017)
+    Kode wilayah: 32.01.30.2005
+    """
+    show = (n_desa or 0) % 2 == 1
+    if not show or not DESA_GEOJSON:
+        return []
+
     children = []
+    for feature in DESA_GEOJSON.get("features", []):
+        props = feature.get("properties", {})
+        nama  = props.get("WADMKD", "Petir")
+        kec   = props.get("WADMKC", "Dramaga")
+        kab   = props.get("WADMKK", "Bogor")
+        luas  = props.get("LUAS",   4.27)
+        kode  = props.get("KDEPUM", "32.01.30.2005")
+        sumber= props.get("UUPP",   "BIG")
 
-    # Tampilkan/sembunyikan berdasarkan toggle
-    show_desa = (n_desa or 0) % 2 == 1
-
-    if not show_desa or not map_data:
-        return children
-
-    # Render batas semua desa di Kec. Dramaga (abu-abu tipis)
-    kec_data = map_data.get("kecamatan")
-    if kec_data:
-        for feature in kec_data.get("features", []):
-            nama = feature.get("properties", {}).get("WADMKD", "")
-            is_petir = "PETIR" in nama.upper()
-            children.append(
-                dl.GeoJSON(
-                    data=feature,
-                    style={
-                        "color":       "#f59e0b" if is_petir else "#475569",
-                        "weight":      3 if is_petir else 1,
-                        "fillColor":   "#f59e0b" if is_petir else "#1e293b",
-                        "fillOpacity": 0.15 if is_petir else 0.05,
-                        "dashArray":   "0" if is_petir else "4,4",
-                    },
-                    children=[
-                        dl.Tooltip(
-                            html.Div([
-                                html.B(f"{'📍 ' if is_petir else ''}{nama}"),
-                                html.Br() if is_petir else html.Span(),
-                                html.Span("Kec. Dramaga, Kab. Bogor",
-                                          style={"fontSize": "11px", "color": "#64748b"}),
-                            ])
-                        ),
-                    ],
-                )
+        children.append(
+            dl.GeoJSON(
+                data=feature,
+                id="geojson-desa-petir",
+                style={
+                    "color":       "#f59e0b",
+                    "weight":      3,
+                    "fillColor":   "#f59e0b",
+                    "fillOpacity": 0.12,
+                    "dashArray":   "0",
+                },
+                children=[
+                    dl.Tooltip(html.Div([
+                        html.B(f"📍 Desa {nama}",
+                               style={"color": "#f59e0b", "fontSize": "13px"}),
+                        html.Br(),
+                        html.Span(f"Kec. {kec}, Kab. {kab}"),
+                        html.Br(),
+                        html.Span(f"Luas: {luas:.2f} km²",
+                                  style={"fontSize": "11px"}),
+                        html.Br(),
+                        html.Span(f"Kode: {kode}",
+                                  style={"fontSize": "11px", "color": "#94a3b8"}),
+                        html.Br(),
+                        html.Span(f"© {sumber}",
+                                  style={"fontSize": "10px", "color": "#64748b"}),
+                    ])),
+                    dl.Popup(html.Div([
+                        html.H4(f"📍 Desa {nama}",
+                                style={"margin": "0 0 8px", "color": "#f59e0b"}),
+                        html.Table([
+                            html.Tr([html.Td("Kecamatan"), html.Td(f": {kec}")]),
+                            html.Tr([html.Td("Kabupaten"), html.Td(f": {kab}")]),
+                            html.Tr([html.Td("Provinsi"),  html.Td(": Jawa Barat")]),
+                            html.Tr([html.Td("Luas"),      html.Td(f": {luas:.2f} km²")]),
+                            html.Tr([html.Td("Kode"),      html.Td(f": {kode}")]),
+                        ], style={"fontSize": "12px", "borderSpacing": "4px"}),
+                        html.Hr(style={"margin": "8px 0"}),
+                        html.Span("© BIG – Batas Wilayah Kel/Desa 10K (2017)",
+                                  style={"fontSize": "10px", "color": "#94a3b8"}),
+                    ], style={"minWidth": "200px"})),
+                ],
             )
-
-    # Render batas Desa Petir lebih tebal (jika tidak ada dari kecamatan)
-    desa_data = map_data.get("desa")
-    if desa_data and not kec_data:
-        for feature in desa_data.get("features", []):
-            children.append(
-                dl.GeoJSON(
-                    data=feature,
-                    style={
-                        "color":       "#f59e0b",
-                        "weight":      3,
-                        "fillColor":   "#f59e0b",
-                        "fillOpacity": 0.15,
-                    },
-                    children=[dl.Tooltip("📍 Desa Petir")],
-                )
-            )
-
+        )
     return children
 
 # ─── CALLBACK: TOGGLE LAYER LONGSOR ───────────────────────────────────────────
