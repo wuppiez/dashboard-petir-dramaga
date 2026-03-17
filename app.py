@@ -526,7 +526,7 @@ def metric_card(icon, label, value_id, unit, color="#2196F3"):
 
 # ─── LAYOUT ────────────────────────────────────────────────────────────────────
 app.layout = html.Div([
-    dcc.Interval(id="interval-realtime", interval=1_000, n_intervals=0),   # 30 detik
+    dcc.Interval(id="interval-realtime", interval=30_000, n_intervals=0),   # 30 detik
     dcc.Interval(id="interval-weather",  interval=300_000, n_intervals=0),  # 5 menit
     dcc.Store(id="store-weather"),
     dcc.Store(id="store-openmeteo"),
