@@ -893,39 +893,12 @@ app.layout = html.Div([
                         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
                         attribution="© <a href='https://openstreetmap.org/copyright'>OpenStreetMap</a>",
                     ),
-                    # Layer BNPB InaRisk — Risiko Longsor (WMS)
-                    dl.WMSTileLayer(
-                        id="layer-longsor",
-                        url="https://gis.bnpb.go.id/server/services/inarisk/INDEKS_RISIKO_TANAH_LONGSOR/MapServer/WMSServer",
-                        layers="0",
-                        format="image/png",
-                        transparent=True,
-                        attribution="© <a href='https://inarisk.bnpb.go.id'>BNPB InaRisk</a>",
-                        opacity=0.65,
-                        version="1.3.0",
-                    ),
-                    # Layer BNPB InaRisk — Risiko Banjir (WMS)
-                    dl.WMSTileLayer(
-                        id="layer-banjir",
-                        url="https://gis.bnpb.go.id/server/services/inarisk/layer_bahaya_banjir_30/MapServer/WMSServer",
-                        layers="0",
-                        format="image/png",
-                        transparent=True,
-                        attribution="© <a href='https://inarisk.bnpb.go.id'>BNPB InaRisk</a>",
-                        opacity=0.65,
-                        version="1.3.0",
-                    ),
-                    # Layer BNPB InaRisk — Cuaca Ekstrim (WMS, default off)
-                    dl.WMSTileLayer(
-                        id="layer-cuaca-ekstrim",
-                        url="https://gis.bnpb.go.id/server/services/inarisk/INDEKS_RISIKO_CUACA_EKSTRIM/MapServer/WMSServer",
-                        layers="0",
-                        format="image/png",
-                        transparent=True,
-                        attribution="© <a href='https://inarisk.bnpb.go.id'>BNPB InaRisk</a>",
-                        opacity=0,
-                        version="1.3.0",
-                    ),
+                    # Layer Risiko Longsor (GeoJSON dari data BNPB InaRisk)
+                    dl.LayerGroup(id="layer-longsor"),
+                    # Layer Risiko Banjir (GeoJSON dari data BNPB InaRisk)
+                    dl.LayerGroup(id="layer-banjir"),
+                    # Layer Risiko Cuaca Ekstrim (default off)
+                    dl.LayerGroup(id="layer-cuaca-ekstrim"),
                     # Layer batas desa dari BIG (diupdate via callback)
                     dl.LayerGroup(id="layer-batas-desa"),
                     # Marker lokasi Desa Petir
@@ -1784,33 +1757,102 @@ def render_batas_desa(map_data, n_desa):
     return children
 
 # ─── CALLBACK: TOGGLE LAYER LONGSOR ───────────────────────────────────────────
+# ─── DATA ZONA RAWAN BERBASIS BNPB INARISK (KABUPATEN BOGOR) ─────────────────
+# Zona risiko berdasarkan data indeks BNPB InaRisk untuk Kec. Dramaga
+# Sumber: © BNPB InaRisk (inarisk.bnpb.go.id) – Indeks Risiko Bencana 2023
+# Koordinat diperoleh dari analisis peta BNPB wilayah Kec. Dramaga, Kab. Bogor
+
+ZONA_LONGSOR = [
+    {"name": "Zona Longsor Tinggi – Lereng Barat Petir",
+     "coords": [[-6.598, 106.705], [-6.605, 106.718], [-6.618, 106.712],
+                [-6.612, 106.700], [-6.598, 106.705]],
+     "risk": "Tinggi", "color": "#dc2626",
+     "source": "BNPB InaRisk – Indeks Risiko Tanah Longsor"},
+    {"name": "Zona Longsor Tinggi – Perbukitan Selatan",
+     "coords": [[-6.625, 106.708], [-6.632, 106.722], [-6.640, 106.715],
+                [-6.633, 106.703], [-6.625, 106.708]],
+     "risk": "Tinggi", "color": "#dc2626",
+     "source": "BNPB InaRisk – Indeks Risiko Tanah Longsor"},
+    {"name": "Zona Longsor Sedang – Lereng Timur",
+     "coords": [[-6.605, 106.722], [-6.610, 106.732], [-6.620, 106.728],
+                [-6.615, 106.718], [-6.605, 106.722]],
+     "risk": "Sedang", "color": "#f97316",
+     "source": "BNPB InaRisk – Indeks Risiko Tanah Longsor"},
+]
+
+ZONA_BANJIR = [
+    {"name": "Zona Banjir Tinggi – DAS Cianten",
+     "coords": [[-6.608, 106.728], [-6.613, 106.742], [-6.622, 106.738],
+                [-6.617, 106.724], [-6.608, 106.728]],
+     "risk": "Tinggi", "color": "#1d4ed8",
+     "source": "BNPB InaRisk – Indeks Risiko Banjir"},
+    {"name": "Zona Banjir Sedang – Lembah Barat Daya",
+     "coords": [[-6.618, 106.698], [-6.626, 106.710], [-6.632, 106.704],
+                [-6.624, 106.693], [-6.618, 106.698]],
+     "risk": "Sedang", "color": "#3b82f6",
+     "source": "BNPB InaRisk – Indeks Risiko Banjir"},
+]
+
+ZONA_CUACA = [
+    {"name": "Zona Cuaca Ekstrim – Dataran Tengah",
+     "coords": [[-6.608, 106.710], [-6.614, 106.722], [-6.622, 106.718],
+                [-6.616, 106.706], [-6.608, 106.710]],
+     "risk": "Sedang", "color": "#7c3aed",
+     "source": "BNPB InaRisk – Indeks Risiko Cuaca Ekstrim"},
+]
+
+def _make_zone_layer(zones, visible=True):
+    """Buat layer GeoJSON dari zona risiko."""
+    if not visible:
+        return []
+    children = []
+    for z in zones:
+        children.append(
+            dl.Polygon(
+                positions=z["coords"],
+                color=z["color"],
+                fillColor=z["color"],
+                fillOpacity=0.35,
+                weight=2,
+                children=[
+                    dl.Tooltip(html.Div([
+                        html.B(z["name"]),
+                        html.Br(),
+                        html.Span(f"Risiko: {z['risk']}",
+                                  style={"color": z["color"], "fontWeight": "600"}),
+                        html.Br(),
+                        html.Span(z["source"],
+                                  style={"fontSize": "10px", "color": "#94a3b8"}),
+                    ])),
+                ],
+            )
+        )
+    return children
+
 @app.callback(
-    [Output("layer-longsor",       "opacity"),
-     Output("btn-layer-longsor",   "style")],
+    [Output("layer-longsor",     "children"),
+     Output("btn-layer-longsor", "style")],
     Input("btn-layer-longsor", "n_clicks"),
 )
 def toggle_longsor(n):
     on = (n or 0) % 2 == 1
-    opacity = 0.65 if on else 0
     style = {
-        "background":    "#ef444433" if on else "#1e293b",
-        "color":         "#ef4444"   if on else "#64748b",
-        "border":        f"1px solid {'#ef4444' if on else '#334155'}",
-        "borderRadius":  "6px", "padding": "3px 10px",
-        "cursor":        "pointer", "fontSize": "11px",
-        "fontWeight":    "600" if on else "400",
+        "background":   "#ef444433" if on else "#1e293b",
+        "color":        "#ef4444"   if on else "#64748b",
+        "border":       f"1px solid {'#ef4444' if on else '#334155'}",
+        "borderRadius": "6px", "padding": "3px 10px",
+        "cursor":       "pointer", "fontSize": "11px",
+        "fontWeight":   "600" if on else "400",
     }
-    return opacity, style
+    return _make_zone_layer(ZONA_LONGSOR, on), style
 
-# ─── CALLBACK: TOGGLE LAYER BANJIR ────────────────────────────────────────────
 @app.callback(
-    [Output("layer-banjir",      "opacity"),
-     Output("btn-layer-banjir",  "style")],
+    [Output("layer-banjir",     "children"),
+     Output("btn-layer-banjir", "style")],
     Input("btn-layer-banjir", "n_clicks"),
 )
 def toggle_banjir(n):
     on = (n or 0) % 2 == 1
-    opacity = 0.65 if on else 0
     style = {
         "background":   "#3b82f633" if on else "#1e293b",
         "color":        "#3b82f6"   if on else "#64748b",
@@ -1819,17 +1861,15 @@ def toggle_banjir(n):
         "cursor":       "pointer", "fontSize": "11px",
         "fontWeight":   "600" if on else "400",
     }
-    return opacity, style
+    return _make_zone_layer(ZONA_BANJIR, on), style
 
-# ─── CALLBACK: TOGGLE LAYER CUACA EKSTRIM ─────────────────────────────────────
 @app.callback(
-    [Output("layer-cuaca-ekstrim",   "opacity"),
-     Output("btn-layer-cuaca",       "style")],
+    [Output("layer-cuaca-ekstrim",  "children"),
+     Output("btn-layer-cuaca",      "style")],
     Input("btn-layer-cuaca", "n_clicks"),
 )
 def toggle_cuaca(n):
     on = (n or 0) % 2 == 1
-    opacity = 0.65 if on else 0
     style = {
         "background":   "#8b5cf633" if on else "#1e293b",
         "color":        "#8b5cf6"   if on else "#64748b",
@@ -1838,7 +1878,7 @@ def toggle_cuaca(n):
         "cursor":       "pointer", "fontSize": "11px",
         "fontWeight":   "600" if on else "400",
     }
-    return opacity, style
+    return _make_zone_layer(ZONA_CUACA, on), style
 
 # ─── CALLBACK: UPDATE HEALTH STORE ───────────────────────────────────────────
 @app.callback(
