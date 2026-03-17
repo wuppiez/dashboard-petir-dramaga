@@ -25,6 +25,14 @@ def now_wib():
     """Ambil waktu sekarang dalam WIB (UTC+7)."""
     return datetime.now(timezone.utc).astimezone(WIB)
 
+# ─── IMPORT MAP LAYERS ────────────────────────────────────────────────────────
+try:
+    from map_layers import (fetch_batas_desa_petir, fetch_batas_kecamatan_dramaga,
+                            fetch_inarisk_indeks, get_map_tile_layers)
+    MAP_LAYERS_AVAILABLE = True
+except ImportError:
+    MAP_LAYERS_AVAILABLE = False
+
 # ─── IMPORT API HEALTH CHECK ──────────────────────────────────────────────────
 try:
     from api_health import check_all_apis
@@ -498,6 +506,8 @@ app.layout = html.Div([
     dcc.Store(id="store-bmkg"),
     dcc.Store(id="store-cap"),
     dcc.Store(id="store-health"),
+    dcc.Store(id="store-map-layers"),
+    dcc.Interval(id="interval-map", interval=3_600_000, n_intervals=0),  # 1 jam
     dcc.Interval(id="interval-health", interval=300_000, n_intervals=0),  # 5 menit
     dcc.Interval(id="interval-cap", interval=1_800_000, n_intervals=0),  # 30 menit
     dcc.Store(id="store-fused"),
@@ -839,36 +849,127 @@ app.layout = html.Div([
 
             # Panel kanan: peta
             html.Div([
-                html.H3("🗺 Peta Rawan Bencana Hidrometeorologi",
-                        style={"color": "#38bdf8", "margin": "0 0 12px",
-                               "fontSize": "15px", "fontWeight": "600"}),
+                html.Div([
+                    html.H3("🗺 Peta Rawan Bencana Hidrometeorologi",
+                            style={"color": "#38bdf8", "margin": "0",
+                                   "fontSize": "15px", "fontWeight": "600"}),
+                    # Layer toggle buttons
+                    html.Div([
+                        html.Button("🏔️ Longsor", id="btn-layer-longsor",
+                                    n_clicks=1,
+                                    style={"background": "#ef444433", "color": "#ef4444",
+                                           "border": "1px solid #ef4444",
+                                           "borderRadius": "6px", "padding": "3px 10px",
+                                           "cursor": "pointer", "fontSize": "11px",
+                                           "fontWeight": "600"}),
+                        html.Button("🌊 Banjir", id="btn-layer-banjir",
+                                    n_clicks=1,
+                                    style={"background": "#3b82f633", "color": "#3b82f6",
+                                           "border": "1px solid #3b82f6",
+                                           "borderRadius": "6px", "padding": "3px 10px",
+                                           "cursor": "pointer", "fontSize": "11px",
+                                           "fontWeight": "600"}),
+                        html.Button("⛈️ Cuaca Ekstrim", id="btn-layer-cuaca",
+                                    n_clicks=0,
+                                    style={"background": "#1e293b", "color": "#64748b",
+                                           "border": "1px solid #334155",
+                                           "borderRadius": "6px", "padding": "3px 10px",
+                                           "cursor": "pointer", "fontSize": "11px"}),
+                        html.Button("🏘️ Batas Desa", id="btn-layer-desa",
+                                    n_clicks=1,
+                                    style={"background": "#f59e0b33", "color": "#f59e0b",
+                                           "border": "1px solid #f59e0b",
+                                           "borderRadius": "6px", "padding": "3px 10px",
+                                           "cursor": "pointer", "fontSize": "11px",
+                                           "fontWeight": "600"}),
+                    ], style={"display": "flex", "gap": "6px", "flexWrap": "wrap"}),
+                ], style={"display": "flex", "justifyContent": "space-between",
+                          "alignItems": "center", "marginBottom": "10px",
+                          "flexWrap": "wrap", "gap": "8px"}),
+
                 dl.Map([
-                    dl.TileLayer(url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-                                 attribution="© OpenStreetMap"),
-                    dl.LayerGroup(id="hazard-layer", children=[
-                        dl.Polygon(
-                            positions=z["coords"],
-                            color=z["color"],
-                            fillColor=z["color"],
-                            fillOpacity=0.4,
-                            weight=2,
-                            children=[dl.Tooltip(z["name"] + f" – Risiko {z['risk']}")],
-                        ) for z in hazard_zones
-                    ]),
-                    dl.Marker(position=[LAT, LON],
-                              children=[dl.Tooltip(f"📍 {LOCATION_NAME}")]),
+                    # Basemap OpenStreetMap
+                    dl.TileLayer(
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                        attribution="© <a href='https://openstreetmap.org/copyright'>OpenStreetMap</a>",
+                    ),
+                    # Layer BNPB InaRisk — Risiko Longsor
+                    dl.TileLayer(
+                        id="layer-longsor",
+                        url=("https://gis.bnpb.go.id/server/rest/services/inarisk"
+                             "/INDEKS_RISIKO_TANAH_LONGSOR/MapServer/tile/{z}/{y}/{x}"),
+                        attribution="© <a href='https://inarisk.bnpb.go.id'>BNPB InaRisk</a>",
+                        opacity=0.65,
+                    ),
+                    # Layer BNPB InaRisk — Risiko Banjir
+                    dl.TileLayer(
+                        id="layer-banjir",
+                        url=("https://gis.bnpb.go.id/server/rest/services/inarisk"
+                             "/INDEKS_RISIKO_BANJIR/MapServer/tile/{z}/{y}/{x}"),
+                        attribution="© <a href='https://inarisk.bnpb.go.id'>BNPB InaRisk</a>",
+                        opacity=0.65,
+                    ),
+                    # Layer BNPB InaRisk — Cuaca Ekstrim (default off)
+                    dl.TileLayer(
+                        id="layer-cuaca-ekstrim",
+                        url=("https://gis.bnpb.go.id/server/rest/services/inarisk"
+                             "/INDEKS_RISIKO_CUACA_EKSTRIM/MapServer/tile/{z}/{y}/{x}"),
+                        attribution="© <a href='https://inarisk.bnpb.go.id'>BNPB InaRisk</a>",
+                        opacity=0,  # default off
+                    ),
+                    # Layer batas desa dari BIG (diupdate via callback)
+                    dl.LayerGroup(id="layer-batas-desa"),
+                    # Marker lokasi Desa Petir
+                    dl.Marker(
+                        position=[LAT, LON],
+                        children=[
+                            dl.Tooltip("📍 Desa Petir, Kec. Dramaga"),
+                            dl.Popup(html.Div([
+                                html.B("📍 Desa Petir"),
+                                html.Br(),
+                                html.Span("Kec. Dramaga, Kab. Bogor"),
+                                html.Br(),
+                                html.Span(f"Koordinat: {LAT}, {LON}",
+                                          style={"fontSize": "11px", "color": "#64748b"}),
+                            ])),
+                        ],
+                    ),
                 ],
                 center=[LAT, LON], zoom=13,
-                style={"height": "340px", "borderRadius": "8px"},
+                style={"height": "360px", "borderRadius": "8px"},
                 id="main-map"),
-                # Legenda
+
+                # Legenda & Copyright
                 html.Div([
                     html.Div([
-                        html.Span("■", style={"color": "#e74c3c", "marginRight": "4px"}), "Longsor Tinggi",
-                        html.Span("■", style={"color": "#e67e22", "marginLeft": "12px", "marginRight": "4px"}), "Banjir Sedang",
-                        html.Span("■", style={"color": "#27ae60", "marginLeft": "12px", "marginRight": "4px"}), "Aman",
-                    ], style={"fontSize": "12px", "color": "#94a3b8", "marginTop": "8px"}),
-                ]),
+                        html.Span("■", style={"color": "#ef4444", "marginRight": "3px"}),
+                        html.Span("Longsor Tinggi", style={"marginRight": "10px"}),
+                        html.Span("■", style={"color": "#3b82f6", "marginRight": "3px"}),
+                        html.Span("Banjir Tinggi", style={"marginRight": "10px"}),
+                        html.Span("─", style={"color": "#f59e0b", "marginRight": "3px",
+                                              "fontWeight": "700"}),
+                        html.Span("Batas Desa"),
+                    ], style={"fontSize": "11px", "color": "#94a3b8"}),
+                    html.Div([
+                        html.Span("© Sumber: ", style={"color": "#475569", "fontSize": "10px"}),
+                        html.A("BNPB InaRisk",
+                               href="https://inarisk.bnpb.go.id", target="_blank",
+                               style={"color": "#ef4444", "fontSize": "10px",
+                                      "textDecoration": "none"}),
+                        html.Span(" · ", style={"color": "#334155"}),
+                        html.A("BIG",
+                               href="https://geoservices.big.go.id", target="_blank",
+                               style={"color": "#f59e0b", "fontSize": "10px",
+                                      "textDecoration": "none"}),
+                        html.Span(" · ", style={"color": "#334155"}),
+                        html.A("OpenStreetMap",
+                               href="https://openstreetmap.org/copyright", target="_blank",
+                               style={"color": "#38bdf8", "fontSize": "10px",
+                                      "textDecoration": "none"}),
+                    ]),
+                ], style={"display": "flex", "justifyContent": "space-between",
+                          "alignItems": "center", "marginTop": "8px",
+                          "flexWrap": "wrap", "gap": "4px"}),
             ], style={
                 "background": "linear-gradient(135deg, #1e293b, #0f172a)",
                 "border": "1px solid #1e40af33",
@@ -1592,6 +1693,143 @@ def update_soil_chart(_):
         hovermode="x unified",
     )
     return fig
+
+# ─── CALLBACK: LOAD BATAS DESA (1 JAM SEKALI) ────────────────────────────────
+@app.callback(
+    Output("store-map-layers", "data"),
+    Input("interval-map", "n_intervals"),
+)
+def load_map_data(_):
+    if not MAP_LAYERS_AVAILABLE:
+        return {}
+    # Ambil batas desa & kecamatan dari BIG
+    desa_geojson = fetch_batas_desa_petir()
+    kec_geojson  = fetch_batas_kecamatan_dramaga()
+    return {
+        "desa":       desa_geojson,
+        "kecamatan":  kec_geojson,
+        "loaded_at":  datetime.now(WIB).strftime("%H:%M WIB"),
+    }
+
+# ─── CALLBACK: RENDER BATAS DESA DI PETA ──────────────────────────────────────
+@app.callback(
+    Output("layer-batas-desa", "children"),
+    [Input("store-map-layers",  "data"),
+     Input("btn-layer-desa",    "n_clicks")],
+)
+def render_batas_desa(map_data, n_desa):
+    children = []
+
+    # Tampilkan/sembunyikan berdasarkan toggle
+    show_desa = (n_desa or 0) % 2 == 1
+
+    if not show_desa or not map_data:
+        return children
+
+    # Render batas semua desa di Kec. Dramaga (abu-abu tipis)
+    kec_data = map_data.get("kecamatan")
+    if kec_data:
+        for feature in kec_data.get("features", []):
+            nama = feature.get("properties", {}).get("WADMKD", "")
+            is_petir = "PETIR" in nama.upper()
+            children.append(
+                dl.GeoJSON(
+                    data=feature,
+                    style={
+                        "color":       "#f59e0b" if is_petir else "#475569",
+                        "weight":      3 if is_petir else 1,
+                        "fillColor":   "#f59e0b" if is_petir else "#1e293b",
+                        "fillOpacity": 0.15 if is_petir else 0.05,
+                        "dashArray":   "0" if is_petir else "4,4",
+                    },
+                    children=[
+                        dl.Tooltip(
+                            html.Div([
+                                html.B(f"{'📍 ' if is_petir else ''}{nama}"),
+                                html.Br() if is_petir else html.Span(),
+                                html.Span("Kec. Dramaga, Kab. Bogor",
+                                          style={"fontSize": "11px", "color": "#64748b"}),
+                            ])
+                        ),
+                    ],
+                )
+            )
+
+    # Render batas Desa Petir lebih tebal (jika tidak ada dari kecamatan)
+    desa_data = map_data.get("desa")
+    if desa_data and not kec_data:
+        for feature in desa_data.get("features", []):
+            children.append(
+                dl.GeoJSON(
+                    data=feature,
+                    style={
+                        "color":       "#f59e0b",
+                        "weight":      3,
+                        "fillColor":   "#f59e0b",
+                        "fillOpacity": 0.15,
+                    },
+                    children=[dl.Tooltip("📍 Desa Petir")],
+                )
+            )
+
+    return children
+
+# ─── CALLBACK: TOGGLE LAYER LONGSOR ───────────────────────────────────────────
+@app.callback(
+    [Output("layer-longsor",       "opacity"),
+     Output("btn-layer-longsor",   "style")],
+    Input("btn-layer-longsor", "n_clicks"),
+)
+def toggle_longsor(n):
+    on = (n or 0) % 2 == 1
+    opacity = 0.65 if on else 0
+    style = {
+        "background":    "#ef444433" if on else "#1e293b",
+        "color":         "#ef4444"   if on else "#64748b",
+        "border":        f"1px solid {'#ef4444' if on else '#334155'}",
+        "borderRadius":  "6px", "padding": "3px 10px",
+        "cursor":        "pointer", "fontSize": "11px",
+        "fontWeight":    "600" if on else "400",
+    }
+    return opacity, style
+
+# ─── CALLBACK: TOGGLE LAYER BANJIR ────────────────────────────────────────────
+@app.callback(
+    [Output("layer-banjir",      "opacity"),
+     Output("btn-layer-banjir",  "style")],
+    Input("btn-layer-banjir", "n_clicks"),
+)
+def toggle_banjir(n):
+    on = (n or 0) % 2 == 1
+    opacity = 0.65 if on else 0
+    style = {
+        "background":   "#3b82f633" if on else "#1e293b",
+        "color":        "#3b82f6"   if on else "#64748b",
+        "border":       f"1px solid {'#3b82f6' if on else '#334155'}",
+        "borderRadius": "6px", "padding": "3px 10px",
+        "cursor":       "pointer", "fontSize": "11px",
+        "fontWeight":   "600" if on else "400",
+    }
+    return opacity, style
+
+# ─── CALLBACK: TOGGLE LAYER CUACA EKSTRIM ─────────────────────────────────────
+@app.callback(
+    [Output("layer-cuaca-ekstrim",   "opacity"),
+     Output("btn-layer-cuaca",       "style")],
+    Input("btn-layer-cuaca", "n_clicks"),
+)
+def toggle_cuaca(n):
+    on = (n or 0) % 2 == 1
+    opacity = 0.65 if on else 0
+    style = {
+        "background":   "#8b5cf633" if on else "#1e293b",
+        "color":        "#8b5cf6"   if on else "#64748b",
+        "border":       f"1px solid {'#8b5cf6' if on else '#334155'}",
+        "borderRadius": "6px", "padding": "3px 10px",
+        "cursor":       "pointer", "fontSize": "11px",
+        "fontWeight":   "600" if on else "400",
+    }
+    return opacity, style
 
 # ─── CALLBACK: UPDATE HEALTH STORE ───────────────────────────────────────────
 @app.callback(
