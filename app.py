@@ -198,7 +198,12 @@ def fetch_bmkg():
     Kode wilayah: 32.01.30.2005 (Kepmendagri No. 100.1.1-6117 Tahun 2022)
     """
     try:
-        r = requests.get(BMKG_API_URL, timeout=8)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; DashboardPetir/1.0)",
+            "Accept": "application/json",
+            "Referer": "https://data.bmkg.go.id/",
+        }
+        r = requests.get(BMKG_API_URL, headers=headers, timeout=8)
         if r.status_code == 200:
             data = r.json()
 
