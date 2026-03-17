@@ -183,40 +183,94 @@ def fetch_openmeteo():
     }
 
 # ─── BMKG API ─────────────────────────────────────────────────────────────────
-# Kode wilayah BMKG: Kecamatan Dramaga, Kabupaten Bogor
-BMKG_AREA_CODE = "501212"  # Kode adm4 Dramaga
+# Sumber resmi: https://data.bmkg.go.id/prakiraan-cuaca/
+# Kode wilayah: Desa Petir, Kecamatan Dramaga, Kabupaten Bogor, Jawa Barat
+# Ref: Kepmendagri No. 100.1.1-6117 Tahun 2022
+# © BMKG – Badan Meteorologi, Klimatologi, dan Geofisika (bmkg.go.id)
+BMKG_AREA_CODE = "32.01.30.2005"  # Desa Petir, Kec. Dramaga, Kab. Bogor
+BMKG_API_URL   = f"https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={BMKG_AREA_CODE}"
+BMKG_GITHUB    = "https://github.com/infoBMKG/data-cuaca"
 
 def fetch_bmkg():
-    """Ambil prakiraan cuaca BMKG untuk Kecamatan Dramaga."""
+    """
+    Ambil prakiraan cuaca BMKG untuk Desa Petir, Kec. Dramaga.
+    Sumber: © BMKG – https://data.bmkg.go.id/prakiraan-cuaca/
+    Kode wilayah: 32.01.30.2005 (Kepmendagri No. 100.1.1-6117 Tahun 2022)
+    """
     try:
-        url = f"https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={BMKG_AREA_CODE}"
-        r   = requests.get(url, timeout=8)
+        r = requests.get(BMKG_API_URL, timeout=8)
         if r.status_code == 200:
             data = r.json()
-            # Ambil data cuaca terkini (index 0 = periode terdekat)
-            lokasi = data.get("data", [{}])[0]
-            cuaca  = lokasi.get("cuaca", [[]])[0]
-            if cuaca:
-                item = cuaca[0]
-                return {
-                    "temp":     item.get("t",   27.0),
-                    "humidity": item.get("hu",  80.0),
-                    "wind_speed":  item.get("ws", 5.0),
-                    "wind_dir":    item.get("wd", "S"),
-                    "weather_desc": item.get("weather_desc", "Berawan"),
-                    "rain_intensity": item.get("rain_intensity", "-"),
-                    "source": "BMKG",
-                    "ok": True,
-                }
+
+            # Struktur: data[0].cuaca[periode][jam]
+            lokasi_list = data.get("data", [])
+            if not lokasi_list:
+                raise ValueError("Data lokasi kosong")
+
+            lokasi = lokasi_list[0]
+            cuaca_list = lokasi.get("cuaca", [])
+
+            # Cari data yang paling dekat dengan waktu sekarang
+            now_wib_dt = now_wib()
+            best_item  = None
+            min_diff   = float("inf")
+
+            for periode in cuaca_list:
+                for item in periode:
+                    try:
+                        # Parse waktu lokal dari BMKG
+                        local_dt_str = item.get("local_datetime", "")
+                        if local_dt_str:
+                            local_dt = datetime.strptime(
+                                local_dt_str[:19], "%Y-%m-%d %H:%M:%S"
+                            ).replace(tzinfo=WIB)
+                            diff = abs((local_dt - now_wib_dt).total_seconds())
+                            if diff < min_diff:
+                                min_diff  = diff
+                                best_item = item
+                    except Exception:
+                        continue
+
+            if not best_item:
+                best_item = cuaca_list[0][0] if cuaca_list else {}
+
+            # Konversi ws dari km/jam ke m/s
+            ws_kmh = float(best_item.get("ws", 0) or 0)
+            ws_ms  = round(ws_kmh / 3.6, 2)
+
+            return {
+                "temp":          float(best_item.get("t",   27.0) or 27.0),
+                "humidity":      float(best_item.get("hu",  80.0) or 80.0),
+                "wind_speed":    ws_ms,
+                "wind_dir":      best_item.get("wd",  "S"),
+                "weather_desc":  best_item.get("weather_desc", "Berawan"),
+                "weather_desc_en": best_item.get("weather_desc_en", "Cloudy"),
+                "cloud_cover":   float(best_item.get("tcc", 50) or 50),
+                "visibility":    best_item.get("vs_text", "-"),
+                "local_datetime": best_item.get("local_datetime", "-"),
+                "analysis_date": best_item.get("analysis_date", "-"),
+                "source":        "BMKG",
+                "source_url":    "https://data.bmkg.go.id/prakiraan-cuaca/",
+                "area_code":     BMKG_AREA_CODE,
+                "ok":            True,
+            }
+
     except Exception as e:
-        print(f"BMKG error: {e}")
-    # Fallback
+        print(f"BMKG API error: {e}")
+
+    # Fallback jika API tidak tersedia
     return {
         "temp": 27.8, "humidity": 83.0,
-        "wind_speed": 6.2, "wind_dir": "S",
-        "weather_desc": "Berawan (fallback)",
-        "rain_intensity": "-",
-        "source": "BMKG", "ok": False,
+        "wind_speed": 1.7, "wind_dir": "S",
+        "weather_desc": "Data tidak tersedia",
+        "weather_desc_en": "Unavailable",
+        "cloud_cover": 50.0,
+        "visibility": "-",
+        "local_datetime": "-",
+        "analysis_date": "-",
+        "source": "BMKG", "source_url": "https://data.bmkg.go.id",
+        "area_code": BMKG_AREA_CODE,
+        "ok": False,
     }
 
 # ─── DATA FUSION ENGINE ────────────────────────────────────────────────────────
@@ -599,8 +653,14 @@ app.layout = html.Div([
                         html.Div(id="fused-bmkg-desc",
                                  style={"fontSize": "14px", "fontWeight": "700",
                                         "color": "#38bdf8", "lineHeight": "1.4"}),
-                        html.Div("Sumber: BMKG Dramaga",
-                                 style={"fontSize": "10px", "color": "#475569", "marginTop": "6px"}),
+                        html.Div([
+                        html.Span("Sumber: ", style={"fontSize": "10px", "color": "#475569"}),
+                        html.A("© BMKG – data.bmkg.go.id",
+                               href="https://data.bmkg.go.id/prakiraan-cuaca/",
+                               target="_blank",
+                               style={"fontSize": "10px", "color": "#f59e0b",
+                                      "textDecoration": "none"}),
+                    ], style={"marginTop": "6px"}),
                     ], style={"flex": "1", "minWidth": "140px", "padding": "12px",
                               "background": "#0f172a", "borderRadius": "10px",
                               "border": "1px solid #10b98133"}),
