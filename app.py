@@ -25,6 +25,19 @@ def now_wib():
     """Ambil waktu sekarang dalam WIB (UTC+7)."""
     return datetime.now(timezone.utc).astimezone(WIB)
 
+# ─── IMPORT BMKG CAP ──────────────────────────────────────────────────────────
+try:
+    from bmkg_cap import fetch_bmkg_cap, get_cap_status, format_cap_telegram
+    BMKG_CAP_AVAILABLE = True
+except ImportError:
+    BMKG_CAP_AVAILABLE = False
+    def fetch_bmkg_cap(): return []
+    def get_cap_status(a): return {"active": False, "count": 0, "level": "NORMAL",
+        "color": "#22c55e", "emoji": "✅", "message": "Module tidak tersedia",
+        "alerts": [], "source": "© BMKG – bmkg.go.id",
+        "data_url": "https://github.com/infoBMKG/data-cap"}
+    def format_cap_telegram(a): return None
+
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "YOUR_OPENWEATHER_API_KEY")
 TELEGRAM_BOT_TOKEN  = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
@@ -41,8 +54,16 @@ THRESHOLD = {
     "AWAS":     150,   # >150 mm/hari
 }
 
-# BARU (baca dari Supabase):
-from db import load_historical
+# ─── LOAD HISTORICAL DATA ──────────────────────────────────────────────────────
+def load_historical():
+    df = pd.read_csv(DATA_FILE, parse_dates=["date"])
+    df.columns = ["date", "rainfall"]
+    df = df.sort_values("date").reset_index(drop=True)
+    df["month"]    = df["date"].dt.month
+    df["year"]     = df["date"].dt.year
+    df["doy"]      = df["date"].dt.dayofyear
+    df["month_str"]= df["date"].dt.strftime("%b")
+    return df
 
 df_hist = load_historical()
 
@@ -406,6 +427,8 @@ app.layout = html.Div([
     dcc.Store(id="store-weather"),
     dcc.Store(id="store-openmeteo"),
     dcc.Store(id="store-bmkg"),
+    dcc.Store(id="store-cap"),
+    dcc.Interval(id="interval-cap", interval=1_800_000, n_intervals=0),  # 30 menit
     dcc.Store(id="store-fused"),
     dcc.Store(id="store-alert-log", data=[]),
     dcc.Interval(id="interval-bmkg", interval=1_800_000, n_intervals=0),  # 30 menit
@@ -438,8 +461,42 @@ app.layout = html.Div([
         "boxShadow": "0 4px 20px rgba(0,0,0,0.4)",
     }),
 
+    # ── BANNER PERINGATAN BMKG CAP ────────────────────────────────────────────
+    html.Div(id="bmkg-cap-banner"),
+
     # ── MAIN CONTENT ───────────────────────────────────────────────────────────
     html.Div([
+
+        # ── SUMBER DATA & COPYRIGHT ────────────────────────────────────────────
+        html.Div([
+            html.Div([
+                html.Span("📡 Sumber Data: ", style={"color": "#64748b", "fontSize": "11px"}),
+                html.Span("OpenWeatherMap", style={"color": "#38bdf8", "fontSize": "11px", "fontWeight": "600"}),
+                html.Span(" · ", style={"color": "#475569"}),
+                html.Span("Open-Meteo", style={"color": "#10b981", "fontSize": "11px", "fontWeight": "600"}),
+                html.Span(" · ", style={"color": "#475569"}),
+                html.Span("© BMKG", style={"color": "#f59e0b", "fontSize": "11px", "fontWeight": "600"}),
+                html.Span(" · ", style={"color": "#475569"}),
+                html.Span("NASA CHIRPS", style={"color": "#8b5cf6", "fontSize": "11px", "fontWeight": "600"}),
+                html.Span(" · ", style={"color": "#475569"}),
+                html.Span("Supabase", style={"color": "#22c55e", "fontSize": "11px", "fontWeight": "600"}),
+            ]),
+            html.Div([
+                html.Span("⚠️ Data peringatan dini oleh ", style={"color": "#64748b", "fontSize": "10px"}),
+                html.A("© BMKG – Badan Meteorologi, Klimatologi, dan Geofisika",
+                       href="https://www.bmkg.go.id", target="_blank",
+                       style={"color": "#f59e0b", "fontSize": "10px", "textDecoration": "none"}),
+                html.Span(" | Data CAP: ", style={"color": "#64748b", "fontSize": "10px"}),
+                html.A("github.com/infoBMKG/data-cap",
+                       href="https://github.com/infoBMKG/data-cap", target="_blank",
+                       style={"color": "#64748b", "fontSize": "10px"}),
+            ]),
+        ], style={
+            "display": "flex", "justifyContent": "space-between", "alignItems": "center",
+            "background": "#0f172a", "border": "1px solid #1e293b",
+            "borderRadius": "8px", "padding": "8px 16px",
+            "marginBottom": "12px", "flexWrap": "wrap", "gap": "8px",
+        }),
 
         # ── ROW 1: METRIC CARDS ─────────────────────────────────────────────
         html.Div([
@@ -1458,6 +1515,104 @@ def update_soil_chart(_):
         hovermode="x unified",
     )
     return fig
+
+# ─── CALLBACK: UPDATE CAP STORE ───────────────────────────────────────────────
+@app.callback(
+    Output("store-cap", "data"),
+    Input("interval-cap", "n_intervals"),
+)
+def update_cap_store(_):
+    alerts = fetch_bmkg_cap()
+    status = get_cap_status(alerts)
+    # Kirim Telegram jika ada peringatan baru
+    if status["active"] and BMKG_CAP_AVAILABLE:
+        msg = format_cap_telegram(alerts)
+        if msg:
+            send_telegram(msg)
+    return status
+
+# ─── CALLBACK: TAMPILKAN BANNER CAP ───────────────────────────────────────────
+@app.callback(
+    Output("bmkg-cap-banner", "children"),
+    Input("store-cap", "data"),
+)
+def update_cap_banner(cap_data):
+    if not cap_data:
+        cap_data = get_cap_status([])
+
+    active  = cap_data.get("active", False)
+    level   = cap_data.get("level",   "NORMAL")
+    color   = cap_data.get("color",   "#22c55e")
+    emoji   = cap_data.get("emoji",   "✅")
+    message = cap_data.get("message", "Tidak ada peringatan aktif dari BMKG")
+    count   = cap_data.get("count",   0)
+    alerts  = cap_data.get("alerts",  [])
+
+    if not active:
+        # Banner hijau kecil — tidak ada peringatan
+        return html.Div([
+            html.Div([
+                html.Span("✅ ", style={"fontSize": "14px"}),
+                html.Span("Tidak ada peringatan aktif BMKG untuk Kecamatan Dramaga",
+                          style={"fontSize": "12px", "color": "#22c55e"}),
+                html.Span(" | ", style={"color": "#1e293b", "margin": "0 8px"}),
+                html.Span("© Sumber: BMKG – bmkg.go.id",
+                          style={"fontSize": "11px", "color": "#475569"}),
+            ], style={"display": "flex", "alignItems": "center", "flexWrap": "wrap"}),
+        ], style={
+            "background": "#052e16",
+            "border":     "1px solid #22c55e33",
+            "borderLeft": "4px solid #22c55e",
+            "padding":    "8px 20px",
+            "marginBottom": "0",
+        })
+
+    # Banner merah/oranye/kuning — ada peringatan aktif
+    alert_items = []
+    for a in alerts[:3]:  # Tampilkan max 3
+        alert_items.append(html.Div([
+            html.Span(f"{a['emoji']} ", style={"fontSize": "14px"}),
+            html.Span(f"{a['event']}", style={"fontWeight": "700", "color": color}),
+            html.Span(f" — {a['headline'][:80]}",
+                      style={"fontSize": "12px", "color": "#f1f5f9"}),
+            html.Span(f" (Berlaku: {a['expires_str']})",
+                      style={"fontSize": "11px", "color": "#94a3b8", "marginLeft": "8px"}),
+        ], style={"marginBottom": "4px"}))
+
+    return html.Div([
+        html.Div([
+            # Judul banner
+            html.Div([
+                html.Span(f"{emoji} PERINGATAN RESMI BMKG ",
+                          style={"fontWeight": "800", "fontSize": "14px",
+                                 "color": color, "letterSpacing": "0.05em"}),
+                html.Span(f"— {count} Peringatan Aktif untuk Kec. Dramaga",
+                          style={"fontSize": "12px", "color": "#f1f5f9"}),
+            ], style={"marginBottom": "6px"}),
+            # List peringatan
+            html.Div(alert_items),
+            # Footer copyright
+            html.Div([
+                html.Span("© Sumber: ", style={"color": "#94a3b8", "fontSize": "10px"}),
+                html.A("BMKG – Badan Meteorologi, Klimatologi, dan Geofisika",
+                       href="https://www.bmkg.go.id", target="_blank",
+                       style={"color": "#f59e0b", "fontSize": "10px",
+                              "textDecoration": "none", "fontWeight": "600"}),
+                html.Span(" | Data CAP: ", style={"color": "#475569", "fontSize": "10px"}),
+                html.A("github.com/infoBMKG/data-cap",
+                       href="https://github.com/infoBMKG/data-cap", target="_blank",
+                       style={"color": "#64748b", "fontSize": "10px"}),
+            ], style={"marginTop": "6px"}),
+        ], style={"maxWidth": "1600px", "margin": "0 auto"}),
+    ], style={
+        "background":   f"linear-gradient(90deg, {color}22 0%, #0f172a 100%)",
+        "border":       f"1px solid {color}44",
+        "borderLeft":   f"5px solid {color}",
+        "borderRadius": "0",
+        "padding":      "12px 24px",
+        "marginBottom": "0",
+        "animation":    "pulse 2s infinite" if level == "AWAS" else "none",
+    })
 
 # ─── SERVER EXPORT (wajib untuk Gunicorn / Render.com) ────────────────────────
 server = app.server   # <── baris ini yang dibaca Gunicorn
