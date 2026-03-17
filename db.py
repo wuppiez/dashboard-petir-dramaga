@@ -29,7 +29,9 @@ def load_from_supabase() -> pd.DataFrame:
     """Ambil semua data curah hujan dari Supabase (dengan pagination)."""
     try:
         if not SUPABASE_URL or not SUPABASE_KEY:
+            print("❌ db.py: SUPABASE_URL atau SUPABASE_ANON_KEY belum diset di environment!")
             raise ValueError("Supabase credentials tidak ditemukan")
+        print(f"🔗 db.py: Connecting to Supabase {SUPABASE_URL[:40]}...")
 
         # Ambil semua data dengan pagination (per 1000 baris)
         all_rows  = []
