@@ -92,8 +92,13 @@ def check_openmeteo():
     return _check("Open-Meteo", url)
 
 def check_bmkg_prakiraan():
-    url = "https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4=501212"
-    return _check("BMKG Prakiraan", url)
+    url = "https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4=32.01.30.2005"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; DashboardPetir/1.0)",
+        "Accept":     "application/json",
+        "Referer":    "https://data.bmkg.go.id/",
+    }
+    return _check("BMKG Prakiraan", url, headers=headers)
 
 def check_bmkg_cap():
     url = ("https://raw.githubusercontent.com/infoBMKG/data-cap/main"
