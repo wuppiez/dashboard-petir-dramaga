@@ -893,29 +893,38 @@ app.layout = html.Div([
                         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
                         attribution="© <a href='https://openstreetmap.org/copyright'>OpenStreetMap</a>",
                     ),
-                    # Layer BNPB InaRisk — Risiko Longsor
-                    dl.TileLayer(
+                    # Layer BNPB InaRisk — Risiko Longsor (WMS)
+                    dl.WMSTileLayer(
                         id="layer-longsor",
-                        url=("https://gis.bnpb.go.id/server/rest/services/inarisk"
-                             "/INDEKS_RISIKO_TANAH_LONGSOR/MapServer/tile/{z}/{y}/{x}"),
+                        url="https://gis.bnpb.go.id/server/services/inarisk/INDEKS_RISIKO_TANAH_LONGSOR/MapServer/WMSServer",
+                        layers="0",
+                        format="image/png",
+                        transparent=True,
                         attribution="© <a href='https://inarisk.bnpb.go.id'>BNPB InaRisk</a>",
                         opacity=0.65,
+                        version="1.3.0",
                     ),
-                    # Layer BNPB InaRisk — Risiko Banjir
-                    dl.TileLayer(
+                    # Layer BNPB InaRisk — Risiko Banjir (WMS)
+                    dl.WMSTileLayer(
                         id="layer-banjir",
-                        url=("https://gis.bnpb.go.id/server/rest/services/inarisk"
-                             "/INDEKS_RISIKO_BANJIR/MapServer/tile/{z}/{y}/{x}"),
+                        url="https://gis.bnpb.go.id/server/services/inarisk/layer_bahaya_banjir_30/MapServer/WMSServer",
+                        layers="0",
+                        format="image/png",
+                        transparent=True,
                         attribution="© <a href='https://inarisk.bnpb.go.id'>BNPB InaRisk</a>",
                         opacity=0.65,
+                        version="1.3.0",
                     ),
-                    # Layer BNPB InaRisk — Cuaca Ekstrim (default off)
-                    dl.TileLayer(
+                    # Layer BNPB InaRisk — Cuaca Ekstrim (WMS, default off)
+                    dl.WMSTileLayer(
                         id="layer-cuaca-ekstrim",
-                        url=("https://gis.bnpb.go.id/server/rest/services/inarisk"
-                             "/INDEKS_RISIKO_CUACA_EKSTRIM/MapServer/tile/{z}/{y}/{x}"),
+                        url="https://gis.bnpb.go.id/server/services/inarisk/INDEKS_RISIKO_CUACA_EKSTRIM/MapServer/WMSServer",
+                        layers="0",
+                        format="image/png",
+                        transparent=True,
                         attribution="© <a href='https://inarisk.bnpb.go.id'>BNPB InaRisk</a>",
-                        opacity=0,  # default off
+                        opacity=0,
+                        version="1.3.0",
                     ),
                     # Layer batas desa dari BIG (diupdate via callback)
                     dl.LayerGroup(id="layer-batas-desa"),
