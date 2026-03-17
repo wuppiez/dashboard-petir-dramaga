@@ -122,7 +122,7 @@ def fetch_weather():
     try:
         url = (f"https://api.openweathermap.org/data/2.5/weather"
                f"?lat={LAT}&lon={LON}&appid={OPENWEATHER_API_KEY}&units=metric&lang=id")
-        r = requests.get(url, timeout=5)
+        r = requests.get(url, timeout=10)
         if r.status_code == 200:
             return r.json()
     except Exception:
@@ -160,24 +160,31 @@ def fetch_forecast():
 # ─── OPEN-METEO API (Suhu Tanah, Kelembaban Tanah, UV, dll) ──────────────────────
 def fetch_openmeteo():
     """Ambil data lengkap dari Open-Meteo API - gratis, tanpa API key."""
-    try:
-        url = (
-            f"https://api.open-meteo.com/v1/forecast"
-            f"?latitude={LAT}&longitude={LON}"
-            f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
-            f"precipitation,rain,wind_speed_10m,wind_direction_10m,"
-            f"surface_pressure,cloud_cover,uv_index,dew_point_2m,"
-            f"soil_temperature_0cm,soil_temperature_6cm,soil_temperature_18cm,"
-            f"soil_moisture_0_to_1cm,soil_moisture_1_to_3cm,soil_moisture_3_to_9cm"
-            f"&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,"
-            f"uv_index_max,wind_speed_10m_max,et0_fao_evapotranspiration"
-            f"&timezone=Asia%2FJakarta&forecast_days=7"
-        )
-        r = requests.get(url, timeout=8)
-        if r.status_code == 200:
-            return r.json()
-    except Exception as e:
-        print(f"Open-Meteo error: {e}")
+    url = (
+        f"https://api.open-meteo.com/v1/forecast"
+        f"?latitude={LAT}&longitude={LON}"
+        f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
+        f"precipitation,rain,wind_speed_10m,wind_direction_10m,"
+        f"surface_pressure,cloud_cover,uv_index,dew_point_2m,"
+        f"soil_temperature_0cm,soil_temperature_6cm,soil_temperature_18cm,"
+        f"soil_moisture_0_to_1cm,soil_moisture_1_to_3cm,soil_moisture_3_to_9cm"
+        f"&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,"
+        f"uv_index_max,wind_speed_10m_max,et0_fao_evapotranspiration"
+        f"&timezone=Asia%2FJakarta&forecast_days=7"
+    )
+    for attempt in range(3):  # Retry 3x
+        try:
+            r = requests.get(url, timeout=15)
+            if r.status_code == 200:
+                return r.json()
+            break
+        except requests.Timeout:
+            print(f"Open-Meteo timeout (attempt {attempt+1}/3)")
+            if attempt < 2:
+                time.sleep(2)
+        except Exception as e:
+            print(f"Open-Meteo error: {e}")
+            break
     # Fallback demo data
     return {
         "current": {
