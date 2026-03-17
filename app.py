@@ -25,6 +25,16 @@ def now_wib():
     """Ambil waktu sekarang dalam WIB (UTC+7)."""
     return datetime.now(timezone.utc).astimezone(WIB)
 
+# ─── IMPORT API HEALTH CHECK ──────────────────────────────────────────────────
+try:
+    from api_health import check_all_apis
+    API_HEALTH_AVAILABLE = True
+except ImportError:
+    API_HEALTH_AVAILABLE = False
+    def check_all_apis(): return {"results": {}, "summary": {
+        "overall_msg": "Module tidak tersedia", "overall_color": "#64748b",
+        "checked_at": "-", "online": 0, "offline": 0, "error": 0, "total": 0}}
+
 # ─── IMPORT BMKG CAP ──────────────────────────────────────────────────────────
 try:
     from bmkg_cap import fetch_bmkg_cap, get_cap_status, format_cap_telegram
@@ -428,6 +438,8 @@ app.layout = html.Div([
     dcc.Store(id="store-openmeteo"),
     dcc.Store(id="store-bmkg"),
     dcc.Store(id="store-cap"),
+    dcc.Store(id="store-health"),
+    dcc.Interval(id="interval-health", interval=300_000, n_intervals=0),  # 5 menit
     dcc.Interval(id="interval-cap", interval=1_800_000, n_intervals=0),  # 30 menit
     dcc.Store(id="store-fused"),
     dcc.Store(id="store-alert-log", data=[]),
@@ -1515,6 +1527,111 @@ def update_soil_chart(_):
         hovermode="x unified",
     )
     return fig
+
+# ─── CALLBACK: UPDATE HEALTH STORE ───────────────────────────────────────────
+@app.callback(
+    Output("store-health", "data"),
+    Input("interval-health", "n_intervals"),
+)
+def update_health_store(_):
+    return check_all_apis()
+
+# ─── CALLBACK: TAMPILKAN HEALTH CHECK PANEL ───────────────────────────────────
+@app.callback(
+    [Output("health-cards",        "children"),
+     Output("health-overall-badge","children"),
+     Output("health-checked-at",   "children")],
+    Input("store-health", "data"),
+)
+def update_health_panel(data):
+    if not data:
+        data = check_all_apis()
+
+    summary = data.get("summary", {})
+    results = data.get("results", {})
+
+    # Badge overall
+    oc = summary.get("overall_color", "#64748b")
+    badge = html.Span(
+        summary.get("overall_msg", "-"),
+        style={"background": oc + "22", "color": oc,
+               "border": f"1px solid {oc}", "borderRadius": "6px",
+               "padding": "3px 10px", "fontSize": "11px", "fontWeight": "700"},
+    )
+
+    # Konfigurasi tampilan tiap API
+    api_config = {
+        "openweathermap": {"icon": "🌤️", "label": "OpenWeatherMap",  "desc": "Cuaca real-time"},
+        "openmeteo":      {"icon": "🌱", "label": "Open-Meteo",      "desc": "Data tanah & UV"},
+        "bmkg_prakiraan": {"icon": "📡", "label": "BMKG Prakiraan",  "desc": "Prakiraan lokal"},
+        "bmkg_cap":       {"icon": "⚠️", "label": "BMKG CAP",        "desc": "Peringatan dini"},
+        "chirps":         {"icon": "🛰️", "label": "NASA CHIRPS",     "desc": "Data CH harian"},
+        "supabase":       {"icon": "🗄️", "label": "Supabase",        "desc": "Database"},
+        "telegram":       {"icon": "📨", "label": "Telegram Bot",    "desc": "Notifikasi"},
+    }
+
+    STATUS_COLOR = {
+        "online":  "#22c55e",
+        "offline": "#ef4444",
+        "error":   "#f59e0b",
+        "unknown": "#64748b",
+    }
+    STATUS_ICON = {
+        "online":  "●",
+        "offline": "●",
+        "error":   "●",
+        "unknown": "○",
+    }
+
+    cards = []
+    for key, cfg in api_config.items():
+        r     = results.get(key, {})
+        st    = r.get("status",      "unknown")
+        lbl   = r.get("label",       "-")
+        ms    = r.get("response_ms", 0)
+        color = STATUS_COLOR.get(st, "#64748b")
+        dot   = STATUS_ICON.get(st, "○")
+
+        # Warna response time
+        ms_color = "#22c55e" if ms < 500 else "#f59e0b" if ms < 1500 else "#ef4444"
+
+        cards.append(html.Div([
+            # Header
+            html.Div([
+                html.Span(cfg["icon"], style={"fontSize": "18px"}),
+                html.Span(dot, style={"color": color, "fontSize": "10px",
+                                      "marginLeft": "4px", "verticalAlign": "middle"}),
+            ], style={"marginBottom": "6px"}),
+            # Nama API
+            html.Div(cfg["label"],
+                     style={"fontSize": "11px", "fontWeight": "700",
+                            "color": "#f1f5f9", "marginBottom": "2px"}),
+            # Deskripsi
+            html.Div(cfg["desc"],
+                     style={"fontSize": "10px", "color": "#475569", "marginBottom": "6px"}),
+            # Status
+            html.Div(lbl[:25],
+                     style={"fontSize": "10px", "color": color,
+                            "fontWeight": "600", "marginBottom": "4px"}),
+            # Response time
+            html.Div(
+                f"{ms}ms" if ms > 0 else "-",
+                style={"fontSize": "10px", "color": ms_color,
+                       "fontWeight": "600" if ms > 0 else "400"},
+            ),
+        ], style={
+            "background":  "#0f172a",
+            "border":      f"1px solid {color}44",
+            "borderTop":   f"3px solid {color}",
+            "borderRadius":"10px",
+            "padding":     "12px",
+            "minWidth":    "110px",
+            "flex":        "1",
+            "boxShadow":   f"0 2px 8px {color}11",
+        }))
+
+    checked = f"🕐 Terakhir dicek: {summary.get('checked_at', '-')} | Update otomatis setiap 5 menit"
+    return cards, badge, checked
 
 # ─── CALLBACK: UPDATE CAP STORE ───────────────────────────────────────────────
 @app.callback(
