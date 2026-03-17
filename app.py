@@ -92,8 +92,11 @@ def load_desa_geojson():
 
 DESA_GEOJSON = load_desa_geojson()
 
-# ─── LOAD HISTORICAL DATA ──────────────────────────────────────────────────────
+# ─── LOAD HISTORICAL DATA (dari Supabase via db.py) ───────────────────────────
+# Sumber: Supabase database + CHIRPS NASA (auto-update harian via GitHub Actions)
+# Fallback otomatis ke CSV lokal jika Supabase tidak tersedia
 from db import load_historical
+
 df_hist = load_historical()
 
 # ─── SIMULATED REAL-TIME BUFFER ────────────────────────────────────────────────
@@ -1014,7 +1017,7 @@ app.layout = html.Div([
         html.Div([
             html.Div([
                 html.Div([
-                    html.H3("📊 Analisis Tren Historis (2005–2025)",
+                    html.H3(id="hist-title", children="📊 Analisis Tren Historis",
                             style={"color": "#38bdf8", "margin": "0", "fontSize": "15px", "fontWeight": "600"}),
                     html.Div([
                         dcc.Dropdown(
@@ -1032,9 +1035,13 @@ app.layout = html.Div([
                         ),
                         dcc.RangeSlider(
                             id="year-range",
-                            min=2005, max=2025, step=1,
-                            value=[2005, 2025],
-                            marks={y: str(y) for y in range(2005, 2026, 5)},
+                            min=int(df_hist["year"].min()),
+                            max=int(df_hist["year"].max()),
+                            step=1,
+                            value=[int(df_hist["year"].min()), int(df_hist["year"].max())],
+                            marks={y: str(y) for y in range(
+                                int(df_hist["year"].min()),
+                                int(df_hist["year"].max()) + 1, 5)},
                             tooltip={"always_visible": False},
                         ),
                     ], style={"display": "flex", "alignItems": "center", "gap": "16px", "flexWrap": "wrap"}),
@@ -1450,6 +1457,14 @@ def update_fused_store(owm, meteo, bmkg):
     if not meteo: meteo = fetch_openmeteo()
     if not bmkg:  bmkg  = fetch_bmkg()
     return fuse_data(owm, meteo, bmkg)
+
+# ─── CALLBACK: UPDATE JUDUL HISTORIS DINAMIS ─────────────────────────────────
+@app.callback(
+    Output("hist-title", "children"),
+    Input("year-range", "value"),
+)
+def update_hist_title(year_range):
+    return f"📊 Analisis Tren Historis ({year_range[0]}–{year_range[1]})"
 
 # ─── CALLBACK: TAMPILKAN FUSION PANEL ─────────────────────────────────────────
 def breakdown_bar(label, value, color, unit=""):
@@ -2192,7 +2207,7 @@ def _handle_tg_command(chat_id, text):
             _tg_send(chat_id, f"🌧️ Curah hujan hari ini: <b>{today_data['rainfall'].sum():.1f} mm</b>")
     elif text == "/ekstrem":
         top5 = df_hist.nlargest(5, "rainfall")[["date", "rainfall"]]
-        rows = ["⛈️ <b>5 Event Hujan Terbesar (2005–2025)</b>", "━━━━━━━━━━━━━━━━"]
+        rows = [f"⛈️ <b>5 Event Hujan Terbesar ({int(df_hist['year'].min())}–{int(df_hist['year'].max())})</b>", "━━━━━━━━━━━━━━━━"]
         for i, row in enumerate(top5.itertuples(), 1):
             rows.append(f"{i}. {row.date.strftime('%d %b %Y')} – <b>{row.rainfall:.1f} mm</b>")
         _tg_send(chat_id, "\n".join(rows))
