@@ -526,8 +526,7 @@ app.layout = html.Div([
     dcc.Store(id="store-bmkg"),
     dcc.Store(id="store-cap"),
     dcc.Store(id="store-health"),
-    dcc.Store(id="store-map-layers"),
-    dcc.Interval(id="interval-map", interval=3_600_000, n_intervals=0),  # 1 jam
+    # map layers pakai file lokal (tidak perlu store/interval)
     dcc.Interval(id="interval-health", interval=300_000, n_intervals=0),  # 5 menit
     dcc.Interval(id="interval-cap", interval=1_800_000, n_intervals=0),  # 30 menit
     dcc.Store(id="store-fused"),
@@ -1702,15 +1701,9 @@ def update_soil_chart(_):
     Input("interval-map", "n_intervals"),
 )
 def load_map_data(_):
-    if not MAP_LAYERS_AVAILABLE:
-        return {}
-    # Ambil batas desa & kecamatan dari BIG
-    desa_geojson = fetch_batas_desa_petir()
-    kec_geojson  = fetch_batas_kecamatan_dramaga()
+    # Pakai file GeoJSON lokal — tidak fetch API eksternal
     return {
-        "desa":       desa_geojson,
-        "kecamatan":  kec_geojson,
-        "loaded_at":  datetime.now(WIB).strftime("%H:%M WIB"),
+        "loaded_at": datetime.now(WIB).strftime("%H:%M WIB"),
     }
 
 # ─── CALLBACK: RENDER BATAS DESA DI PETA ──────────────────────────────────────
