@@ -93,16 +93,7 @@ def load_desa_geojson():
 DESA_GEOJSON = load_desa_geojson()
 
 # ─── LOAD HISTORICAL DATA ──────────────────────────────────────────────────────
-def load_historical():
-    df = pd.read_csv(DATA_FILE, parse_dates=["date"])
-    df.columns = ["date", "rainfall"]
-    df = df.sort_values("date").reset_index(drop=True)
-    df["month"]    = df["date"].dt.month
-    df["year"]     = df["date"].dt.year
-    df["doy"]      = df["date"].dt.dayofyear
-    df["month_str"]= df["date"].dt.strftime("%b")
-    return df
-
+from db import load_historical
 df_hist = load_historical()
 
 # ─── SIMULATED REAL-TIME BUFFER ────────────────────────────────────────────────
