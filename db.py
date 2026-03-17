@@ -26,21 +26,42 @@ def _headers():
     }
 
 def load_from_supabase() -> pd.DataFrame:
-    """Ambil semua data curah hujan dari Supabase."""
+    """Ambil semua data curah hujan dari Supabase (dengan pagination)."""
     try:
         if not SUPABASE_URL or not SUPABASE_KEY:
             raise ValueError("Supabase credentials tidak ditemukan")
 
-        url = (f"{SUPABASE_URL}/rest/v1/{TABLE_NAME}"
-               f"?select=date,rainfall_mm&order=date.asc")
-        r   = requests.get(url, headers=_headers(), timeout=15)
+        # Ambil semua data dengan pagination (per 1000 baris)
+        all_rows  = []
+        page_size = 1000
+        offset    = 0
 
-        if r.status_code != 200:
-            raise Exception(f"HTTP {r.status_code}: {r.text[:100]}")
+        while True:
+            url = (f"{SUPABASE_URL}/rest/v1/{TABLE_NAME}"
+                   f"?select=date,rainfall_mm"
+                   f"&order=date.asc"
+                   f"&limit={page_size}"
+                   f"&offset={offset}")
+            r = requests.get(url, headers=_headers(), timeout=15)
 
-        rows = r.json()
-        if not rows:
+            if r.status_code != 200:
+                raise Exception(f"HTTP {r.status_code}: {r.text[:100]}")
+
+            rows = r.json()
+            if not rows:
+                break  # Tidak ada data lagi
+
+            all_rows += rows
+            print(f"  📦 Halaman {offset//page_size + 1}: {len(rows)} baris diambil...")
+
+            if len(rows) < page_size:
+                break  # Halaman terakhir
+            offset += page_size
+
+        if not all_rows:
             raise Exception("Data kosong di Supabase")
+
+        rows = all_rows
 
         df              = pd.DataFrame(rows)
         df["date"]      = pd.to_datetime(df["date"])
