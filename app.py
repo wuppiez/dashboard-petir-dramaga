@@ -704,7 +704,6 @@ def metric_card(icon, label, value_id, unit, color="#2196F3"):
 
 # ─── LAYOUT ────────────────────────────────────────────────────────────────────
 app.layout = html.Div([
-    dcc.Interval(id="interval-realtime", interval=30_000, n_intervals=0),   # 30 detik
     dcc.Interval(id="interval-weather",  interval=300_000, n_intervals=0),  # 5 menit
     dcc.Store(id="store-weather"),
     dcc.Store(id="store-openmeteo"),
@@ -2716,16 +2715,18 @@ def realtime_trigger(n):
     Jika ada data baru → update cache → trigger refresh grafik.
     """
     global _df_hist_cache
+    _sb_url = os.getenv("SUPABASE_URL", "")
+    _sb_key = os.getenv("SUPABASE_ANON_KEY", "")
     try:
-        if not SUPABASE_URL or not SUPABASE_KEY:
+        if not _sb_url or not _sb_key:
             return n
 
         # Cek tanggal terbaru di Supabase
-        url = (f"{SUPABASE_URL}/rest/v1/rainfall_daily"
+        url = (f"{_sb_url}/rest/v1/rainfall_daily"
                f"?select=date,rainfall_mm&order=date.desc&limit=3")
         headers = {
-            "apikey":        SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "apikey":        _sb_key,
+            "Authorization": f"Bearer {_sb_key}",
         }
         r = requests.get(url, headers=headers, timeout=8)
         if r.status_code != 200:
