@@ -99,16 +99,32 @@ from db import load_historical
 
 df_hist = load_historical()
 
-# ─── LOAD DATA MIKROMETEOROLOGI NASA POWER ─────────────────────────────────────
+# ─── LOAD DATA MIKROMETEOROLOGI NASA POWER (LAZY) ────────────────────────────
+# Tidak diload saat startup — diload saat pertama kali callback dipanggil
 try:
     from db_micromet import load_micromet, load_micromet_recent, get_micromet_stats
     MICROMET_AVAILABLE = True
-    df_micromet = load_micromet()
-    print(f"✅ Micromet loaded: {len(df_micromet)} baris")
-except Exception as e:
-    print(f"⚠️  Micromet tidak tersedia: {e}")
+except ImportError as e:
+    print(f"⚠️  db_micromet tidak tersedia: {e}")
     MICROMET_AVAILABLE = False
-    df_micromet = None
+
+df_micromet = None  # Diload lazy saat callback pertama kali
+
+def get_micromet_data():
+    """Lazy load data micromet — hanya fetch sekali lalu cache."""
+    global df_micromet
+    if df_micromet is not None:
+        return df_micromet
+    if not MICROMET_AVAILABLE:
+        return None
+    try:
+        print("🔄 Loading micromet data (lazy)...")
+        df_micromet = load_micromet()
+        print(f"✅ Micromet loaded: {len(df_micromet)} baris")
+        return df_micromet
+    except Exception as e:
+        print(f"⚠️  Micromet load error: {e}")
+        return None
 
 # ─── SIMULATED REAL-TIME BUFFER ────────────────────────────────────────────────
 # (Ganti dengan sensor / API aktual di produksi)
@@ -2019,6 +2035,9 @@ def update_micromet_chart(param, year_range):
         legend=dict(orientation="h", y=-0.3),
     )
 
+    # Lazy load data micromet
+    df_micromet = get_micromet_data()
+
     # Cek data tersedia
     if df_micromet is None or len(df_micromet) == 0:
         fig = go.Figure()
@@ -2146,6 +2165,7 @@ def update_micromet_chart(param, year_range):
     Input("store-micromet", "data"),
 )
 def update_micromet_stats(data):
+    df_micromet = get_micromet_data()
     if not MICROMET_AVAILABLE or df_micromet is None or len(df_micromet) == 0:
         return [html.Div(
             "⚠️ Data NASA POWER belum tersedia. Jalankan nasa_power_update.py --historical",
