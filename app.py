@@ -82,13 +82,43 @@ THRESHOLD_RT = {
 # Disesuaikan dengan data lokal 8 kejadian bencana Desa Petir 2020–2024
 # Threshold: Percentile P25/P50/P75 dari analisis CHIRPS site-specific
 
-# Threshold site-specific Desa Petir
+# ─── THRESHOLD MULTI-VARIATE DESA PETIR ──────────────────────────────────────
+# Sumber CHIRPS : Analisis P25/P50/P75 — 8 kejadian bencana 2020–2024
+# Sumber NASA   : Estimasi literatur Van Westen (2006), Crozier (1999)
+#                 Akan diperhalus setelah data NASA POWER terkumpul ≥6 bulan
 THRESHOLD = {
-    "ch_h":  {"waspada": 27, "siaga": 29, "awas": 42},   # mm/hari
-    "cum3":  {"waspada": 40, "siaga": 75, "awas": 110},   # mm/3hari
-    "cum7":  {"waspada": 131,"siaga": 173,"awas": 205},   # mm/7hari
-    "rh":    {"waspada": 75, "siaga": 85, "awas": 90},    # %
-    "ws":    {"waspada": 4,  "siaga": 7,  "awas": 10},    # m/s
+    # CH Harian (mm/hari) — CHIRPS site-specific
+    "ch_h":  {"waspada": 27,  "siaga": 29,  "awas": 42},
+    # Kumulatif 3 Hari (mm) — CHIRPS site-specific
+    "cum3":  {"waspada": 40,  "siaga": 75,  "awas": 110},
+    # Kumulatif 7 Hari (mm) — CHIRPS + PVMBG
+    "cum7":  {"waspada": 131, "siaga": 173, "awas": 205},
+    # Kelembaban Udara (%) — Crozier (1999)
+    "rh":    {"waspada": 75,  "siaga": 85,  "awas": 90},
+    # Evapotranspirasi (mm/hari) — Van Westen, kebalikan (rendah=bahaya)
+    "et0":   {"waspada": 3.5, "siaga": 2.5, "awas": 1.5},
+    # Kecepatan Angin (m/s) — data lokal angin kencang Petir
+    "ws":    {"waspada": 3,   "siaga": 6,   "awas": 9},
+}
+
+# Referensi threshold multi-variate untuk notifikasi
+THRESHOLD_MULTIVAR = {
+    # Level WASPADA: salah satu terpenuhi
+    "waspada": lambda ch, c3, c7, rh, et0, ws:
+        ch >= THRESHOLD["ch_h"]["waspada"] or
+        c3 >= THRESHOLD["cum3"]["waspada"] or
+        c7 >= THRESHOLD["cum7"]["waspada"] or
+        rh >= THRESHOLD["rh"]["waspada"],
+    # Level SIAGA: CH+RH atau kumulatif tinggi
+    "siaga": lambda ch, c3, c7, rh, et0, ws:
+        (ch >= THRESHOLD["ch_h"]["siaga"] and rh >= THRESHOLD["rh"]["waspada"]) or
+        c3 >= THRESHOLD["cum3"]["siaga"] or
+        c7 >= THRESHOLD["cum7"]["siaga"],
+    # Level AWAS: kombinasi CH + kondisi tanah jenuh
+    "awas": lambda ch, c3, c7, rh, et0, ws:
+        (ch >= THRESHOLD["ch_h"]["awas"]) or
+        (c3 >= THRESHOLD["cum3"]["awas"]) or
+        (ch >= THRESHOLD["ch_h"]["siaga"] and rh >= THRESHOLD["rh"]["siaga"] and et0 <= THRESHOLD["et0"]["siaga"]),
 }
 
 # Bobot parameter indeks risiko (total = 100)
@@ -121,7 +151,7 @@ def hitung_indeks_risiko(ch_h, cum3, cum7, rh=80, et0=3.0, ws=2.0):
     s_c3  = min(cum3  / THRESHOLD["cum3"]["awas"], 1.0) * RISIKO_WEIGHTS["cum3"]
     s_c7  = min(cum7  / THRESHOLD["cum7"]["awas"], 1.0) * RISIKO_WEIGHTS["cum7"]
     s_rh  = max(rh - 70, 0) / 30 * RISIKO_WEIGHTS["rh"]   # >70% mulai berisiko
-    s_et0 = max(5 - et0, 0) / 5  * RISIKO_WEIGHTS["et0"]  # ET0 rendah = tanah jenuh
+    s_et0 = max(THRESHOLD["et0"]["waspada"] - et0, 0) / THRESHOLD["et0"]["waspada"] * RISIKO_WEIGHTS["et0"]
     s_ws  = min(ws / 10, 1.0)    * RISIKO_WEIGHTS["ws"]
 
     indeks = round(s_ch + s_c3 + s_c7 + s_rh + s_et0 + s_ws, 1)
@@ -155,6 +185,18 @@ def hitung_indeks_risiko(ch_h, cum3, cum7, rh=80, et0=3.0, ws=2.0):
         },
         "threshold": THRESHOLD,
     }
+
+# ─── SUPABASE REALTIME CONFIG ────────────────────────────────────────────────
+SUPABASE_REALTIME_ENABLED = False  # Diaktifkan via env var
+try:
+    from supabase import create_client as _sb_create
+    _sb_url = os.getenv("SUPABASE_URL","")
+    _sb_key = os.getenv("SUPABASE_ANON_KEY","")
+    if _sb_url and _sb_key:
+        SUPABASE_REALTIME_ENABLED = True
+        print("✅ Supabase realtime client tersedia")
+except ImportError:
+    print("⚠️  supabase-py tidak terinstall — realtime tidak aktif")
 
 # ─── LAZY LOADING SEMUA DATA ─────────────────────────────────────────────────
 # Tidak ada data yang diload saat startup — semua lazy saat callback pertama kali
@@ -671,6 +713,8 @@ app.layout = html.Div([
     dcc.Store(id="store-health"),
     dcc.Store(id="store-micromet"),
     dcc.Store(id="store-risiko"),
+    dcc.Store(id="store-realtime-trigger", data=0),
+    dcc.Interval(id="interval-realtime", interval=30_000, n_intervals=0),  # 30 detik
     dcc.Interval(id="interval-risiko", interval=1_800_000, n_intervals=0),  # 30 menit
     dcc.Interval(id="interval-micromet", interval=3_600_000, n_intervals=0),  # 1 jam
     # map layers pakai file lokal (tidak perlu store/interval)
@@ -2280,6 +2324,42 @@ def update_risiko_store(_):
 
         hasil = hitung_indeks_risiko(ch_h, cum3, cum7, rh, et0, ws)
         hasil["updated_at"] = datetime.now(WIB).strftime("%d %b %Y %H:%M WIB")
+
+        # Multi-variate threshold check
+        mv_awas    = THRESHOLD_MULTIVAR["awas"](ch_h, cum3, cum7, rh, et0, ws)
+        mv_siaga   = THRESHOLD_MULTIVAR["siaga"](ch_h, cum3, cum7, rh, et0, ws)
+        mv_waspada = THRESHOLD_MULTIVAR["waspada"](ch_h, cum3, cum7, rh, et0, ws)
+
+        if mv_awas:
+            mv_level = "AWAS"
+        elif mv_siaga:
+            mv_level = "SIAGA"
+        elif mv_waspada:
+            mv_level = "WASPADA"
+        else:
+            mv_level = "NORMAL"
+
+        hasil["mv_level"] = mv_level
+        hasil["mv_awas"]  = mv_awas
+
+        # Notifikasi Telegram jika level AWAS dari multi-variate
+        if mv_awas:
+            try:
+                msg = (
+                    f"🔴 *AWAS MULTI-VARIATE — Desa Petir*\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"⚠️ Indeks Risiko: *{hasil['indeks']}/100*\n"
+                    f"🌧 CH Harian   : *{ch_h:.1f} mm* (threshold: ≥{THRESHOLD['ch_h']['awas']} mm)\n"
+                    f"📊 Kum 3 Hari  : *{cum3:.1f} mm* (threshold: ≥{THRESHOLD['cum3']['awas']} mm)\n"
+                    f"💧 Kelembaban  : *{rh:.0f}%* (threshold: ≥{THRESHOLD['rh']['awas']}%)\n"
+                    f"🌿 ET0         : *{et0:.1f} mm* (threshold: ≤{THRESHOLD['et0']['awas']} mm)\n"
+                    f"⏰ {hasil['updated_at']}\n"
+                    f"📍 Desa Petir, Dramaga, Bogor"
+                )
+                kirim_telegram(msg)
+            except Exception:
+                pass
+
         return hasil
 
     except Exception as e:
@@ -2290,6 +2370,7 @@ def update_risiko_store(_):
 @app.callback(
     [Output("risiko-gauge",       "figure"),
      Output("risiko-level-badge", "children"),
+     Output("risiko-mv-badge",    "children"),
      Output("risiko-breakdown",   "children"),
      Output("risiko-bars",        "children"),
      Output("risiko-updated",     "children")],
@@ -2410,7 +2491,23 @@ def update_risiko_display(data):
         ]))
 
     updated_text = f"🕐 Update: {updated} | Interval: 30 menit"
-    return fig, badge, breakdown, bars, updated_text
+    # Badge multi-variate
+    mv_level = data.get("mv_level", "NORMAL")
+    mv_colors = {"NORMAL": "#22c55e", "WASPADA": "#eab308",
+                 "SIAGA": "#f97316", "AWAS": "#ef4444"}
+    mv_color = mv_colors.get(mv_level, "#22c55e")
+    mv_icons = {"NORMAL": "🟢", "WASPADA": "🟡", "SIAGA": "🟠", "AWAS": "🔴"}
+
+    mv_badge = html.Div([
+        html.Span("Multi-Variate: ", style={"fontSize":"10px","color":"#64748b"}),
+        html.Span(f"{mv_icons.get(mv_level,'')} {mv_level}",
+                  style={"fontSize":"11px","fontWeight":"700","color":mv_color}),
+        html.Span(" (CH+RH+ET0+WS)",
+                  style={"fontSize":"9px","color":"#475569","marginLeft":"4px"}),
+    ], style={"background":f"{mv_color}11","border":f"1px solid {mv_color}44",
+              "borderRadius":"6px","padding":"4px 8px","display":"inline-block"})
+
+    return fig, badge, mv_badge, breakdown, bars, updated_text
 
 # ─── CALLBACK: UPDATE MICROMET STORE ─────────────────────────────────────────
 @app.callback(
@@ -2607,6 +2704,51 @@ def update_micromet_stats(data):
             "boxShadow":   f"0 2px 12px {color}22",
         }))
     return cards
+
+# ─── CALLBACK: SUPABASE REALTIME TRIGGER ─────────────────────────────────────
+@app.callback(
+    Output("store-realtime-trigger", "data"),
+    Input("interval-realtime", "n_intervals"),
+)
+def realtime_trigger(n):
+    """
+    Cek data terbaru dari Supabase setiap 30 detik.
+    Jika ada data baru → update cache → trigger refresh grafik.
+    """
+    global _df_hist_cache
+    try:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            return n
+
+        # Cek tanggal terbaru di Supabase
+        url = (f"{SUPABASE_URL}/rest/v1/rainfall_daily"
+               f"?select=date,rainfall_mm&order=date.desc&limit=3")
+        headers = {
+            "apikey":        SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+        }
+        r = requests.get(url, headers=headers, timeout=8)
+        if r.status_code != 200:
+            return n
+
+        latest_rows = r.json()
+        if not latest_rows:
+            return n
+
+        latest_date = latest_rows[0].get("date","")
+
+        # Bandingkan dengan cache
+        if _df_hist_cache is not None and len(_df_hist_cache) > 0:
+            cache_latest = _df_hist_cache.iloc[-1]["date"].strftime("%Y-%m-%d")
+            if latest_date > cache_latest:
+                # Ada data baru! Reset cache agar di-reload
+                print(f"🔄 Supabase realtime: data baru {latest_date} → reset cache")
+                _df_hist_cache = None
+
+    except Exception as e:
+        print(f"⚠️  Realtime check error: {e}")
+
+    return n
 
 # ─── CALLBACK: UPDATE HEALTH STORE ───────────────────────────────────────────
 @app.callback(
