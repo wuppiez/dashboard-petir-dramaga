@@ -66,10 +66,15 @@ LOCATION_NAME   = "Desa Petir, Dramaga, Bogor"
 DATA_FILE       = "data/rainfall_historical.csv"
 
 # Ambang batas peringatan (mm)
-THRESHOLD = {
-    "WASPADA":   50,   # >50 mm/hari
-    "SIAGA":    100,   # >100 mm/hari
-    "AWAS":     150,   # >150 mm/hari
+# ─── THRESHOLD TERPADU DESA PETIR ────────────────────────────────────────────
+# Sumber: Analisis CHIRPS site-specific 8 kejadian bencana 2020–2024
+# Referensi: BMKG, PVMBG, Van Westen (2006), Puslittanak (2004)
+
+# Threshold CH harian (mm/hari) — grafik realtime & alert
+THRESHOLD_RT = {
+    "WASPADA": 27,   # P25 kejadian bencana Desa Petir
+    "SIAGA":   29,   # P50 kejadian bencana Desa Petir
+    "AWAS":    42,   # P75 kejadian bencana Desa Petir
 }
 
 # ─── ALGORITMA INDEKS RISIKO LONGSOR ─────────────────────────────────────────
@@ -179,21 +184,26 @@ SLOPE_GEOJSON = load_slope_geojson()  # File lokal 1.6MB — OK di startup
 # ── CHIRPS Historical (Supabase — LAZY, tidak diload saat startup) ─────────────
 from db import load_historical
 
+import threading as _threading
 _df_hist_cache = None  # Cache global
+_df_hist_lock  = _threading.Lock()
 
 def get_hist_data():
     """Lazy load data CHIRPS — fetch dari Supabase sekali, cache selamanya."""
     global _df_hist_cache
     if _df_hist_cache is not None:
         return _df_hist_cache
-    try:
-        print("🔄 Loading CHIRPS data (lazy)...")
-        _df_hist_cache = load_historical()
-        print(f"✅ CHIRPS loaded: {len(_df_hist_cache):,} baris")
-        return _df_hist_cache
-    except Exception as e:
-        print(f"⚠️  CHIRPS load error: {e}")
-        return None
+    with _df_hist_lock:
+        if _df_hist_cache is not None:  # Double-check setelah lock
+            return _df_hist_cache
+        try:
+            print("🔄 Loading CHIRPS data (lazy)...")
+            _df_hist_cache = load_historical()
+            print(f"✅ CHIRPS loaded: {len(_df_hist_cache):,} baris")
+            return _df_hist_cache
+        except Exception as e:
+            print(f"⚠️  CHIRPS load error: {e}")
+            return None
 
 # df_hist tetap ada sebagai alias untuk backward compatibility
 # tapi diisi secara lazy
@@ -564,11 +574,11 @@ def check_and_alert(rainfall_1h: float):
     level = None
     emoji = ""
 
-    if rainfall_1h >= THRESHOLD["AWAS"]:
+    if rainfall_1h >= THRESHOLD_RT["AWAS"]:
         level, emoji = "AWAS 🔴", "🚨"
-    elif rainfall_1h >= THRESHOLD["SIAGA"]:
+    elif rainfall_1h >= THRESHOLD_RT["SIAGA"]:
         level, emoji = "SIAGA 🟠", "⚠️"
-    elif rainfall_1h >= THRESHOLD["WASPADA"]:
+    elif rainfall_1h >= THRESHOLD_RT["WASPADA"]:
         level, emoji = "WASPADA 🟡", "⚡"
 
     if level and (last_alert_level["level"] != level or
@@ -580,9 +590,9 @@ def check_and_alert(rainfall_1h: float):
             f"🌧️ Curah Hujan: <b>{rainfall_1h:.1f} mm/jam</b>\n"
             f"⚠️ Status: <b>{level}</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"{'🔴 AWAS – Potensi banjir bandang & longsor!' if rainfall_1h >= THRESHOLD['AWAS'] else ''}"
-            f"{'🟠 SIAGA – Bersiap evakuasi!' if THRESHOLD['SIAGA'] <= rainfall_1h < THRESHOLD['AWAS'] else ''}"
-            f"{'🟡 WASPADA – Pantau terus kondisi!' if THRESHOLD['WASPADA'] <= rainfall_1h < THRESHOLD['SIAGA'] else ''}\n"
+            f"{'🔴 AWAS – Potensi banjir bandang & longsor!' if rainfall_1h >= THRESHOLD_RT['AWAS'] else ''}"
+            f"{'🟠 SIAGA – Bersiap evakuasi!' if THRESHOLD_RT['SIAGA'] <= rainfall_1h < THRESHOLD_RT['AWAS'] else ''}"
+            f"{'🟡 WASPADA – Pantau terus kondisi!' if THRESHOLD_RT['WASPADA'] <= rainfall_1h < THRESHOLD_RT['SIAGA'] else ''}\n"
             f"📊 Sumber: Dashboard Desa Petir"
         )
         send_telegram(msg)
@@ -1376,15 +1386,15 @@ def update_metrics(_, weather, alert_log):
     # Alert check
     level_color = "#22c55e"
     level_text  = "NORMAL"
-    if rain1h >= THRESHOLD["AWAS"]:
+    if rain1h >= THRESHOLD_RT["AWAS"]:
         level_color, level_text = "#ef4444", "⚠️ AWAS"
         check_and_alert(rain1h)
         alert_log.append({"time": now_wib().strftime("%H:%M"), "level": "AWAS", "rain": rain1h})
-    elif rain1h >= THRESHOLD["SIAGA"]:
+    elif rain1h >= THRESHOLD_RT["SIAGA"]:
         level_color, level_text = "#f97316", "⚠️ SIAGA"
         check_and_alert(rain1h)
         alert_log.append({"time": now_wib().strftime("%H:%M"), "level": "SIAGA", "rain": rain1h})
-    elif rain1h >= THRESHOLD["WASPADA"]:
+    elif rain1h >= THRESHOLD_RT["WASPADA"]:
         level_color, level_text = "#eab308", "⚡ WASPADA"
         check_and_alert(rain1h)
         alert_log.append({"time": now_wib().strftime("%H:%M"), "level": "WASPADA", "rain": rain1h})
@@ -1450,9 +1460,9 @@ def update_realtime(_):
     ))
     # Threshold lines
     for label, val, color in [
-        ("Waspada", THRESHOLD["WASPADA"], "#eab308"),
-        ("Siaga",   THRESHOLD["SIAGA"],   "#f97316"),
-        ("Awas",    THRESHOLD["AWAS"],    "#ef4444"),
+        ("Waspada", THRESHOLD_RT["WASPADA"], "#eab308"),
+        ("Siaga",   THRESHOLD_RT["SIAGA"],   "#f97316"),
+        ("Awas",    THRESHOLD_RT["AWAS"],    "#ef4444"),
     ]:
         fig.add_hline(y=val, line_dash="dash", line_color=color,
                       annotation_text=label, annotation_position="left",
