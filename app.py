@@ -72,6 +72,85 @@ THRESHOLD = {
     "AWAS":     150,   # >150 mm/hari
 }
 
+# ─── ALGORITMA INDEKS RISIKO LONGSOR ─────────────────────────────────────────
+# Referensi: Van Westen (2006), PVMBG (2018), Crozier (1999)
+# Disesuaikan dengan data lokal 8 kejadian bencana Desa Petir 2020–2024
+# Threshold: Percentile P25/P50/P75 dari analisis CHIRPS site-specific
+
+# Threshold site-specific Desa Petir
+THRESHOLD = {
+    "ch_h":  {"waspada": 27, "siaga": 29, "awas": 42},   # mm/hari
+    "cum3":  {"waspada": 40, "siaga": 75, "awas": 110},   # mm/3hari
+    "cum7":  {"waspada": 131,"siaga": 173,"awas": 205},   # mm/7hari
+    "rh":    {"waspada": 75, "siaga": 85, "awas": 90},    # %
+    "ws":    {"waspada": 4,  "siaga": 7,  "awas": 10},    # m/s
+}
+
+# Bobot parameter (total = 100)
+WEIGHTS = {
+    "ch_h": 30,   # CH harian       — korelasi 0.459 data lokal
+    "cum3": 25,   # Kumulatif 3 hr  — API antecedent, PVMBG
+    "cum7": 20,   # Kumulatif 7 hr  — Soil saturation, Van Westen
+    "rh":   15,   # Kelembaban udara — Crozier (1999)
+    "et0":   5,   # Evapotranspirasi — defisit air tanah
+    "ws":    5,   # Kec. angin       — angin kencang lokal Petir
+}
+
+def hitung_indeks_risiko(ch_h, cum3, cum7, rh=80, et0=3.0, ws=2.0):
+    """
+    Hitung indeks risiko longsor 0–100.
+
+    Parameter:
+        ch_h  : CH harian (mm)
+        cum3  : Kumulatif 3 hari (mm)
+        cum7  : Kumulatif 7 hari (mm)
+        rh    : Kelembaban udara (%) — default 80%
+        et0   : Evapotranspirasi (mm/hari) — default 3.0
+        ws    : Kecepatan angin (m/s) — default 2.0
+
+    Returns:
+        dict: indeks, level, warna, skor_per_parameter
+    """
+    # Normalisasi tiap parameter ke 0–1 lalu kali bobot
+    s_ch  = min(ch_h  / THRESHOLD["ch_h"]["awas"], 1.0) * WEIGHTS["ch_h"]
+    s_c3  = min(cum3  / THRESHOLD["cum3"]["awas"], 1.0) * WEIGHTS["cum3"]
+    s_c7  = min(cum7  / THRESHOLD["cum7"]["awas"], 1.0) * WEIGHTS["cum7"]
+    s_rh  = max(rh - 70, 0) / 30 * WEIGHTS["rh"]   # >70% mulai berisiko
+    s_et0 = max(5 - et0, 0) / 5  * WEIGHTS["et0"]  # ET0 rendah = tanah jenuh
+    s_ws  = min(ws / 10, 1.0)    * WEIGHTS["ws"]
+
+    indeks = round(s_ch + s_c3 + s_c7 + s_rh + s_et0 + s_ws, 1)
+    indeks = max(0, min(100, indeks))  # Clamp 0–100
+
+    if indeks >= 75:
+        level, warna, emoji = "AWAS",    "#ef4444", "🔴"
+    elif indeks >= 50:
+        level, warna, emoji = "SIAGA",   "#f97316", "🟠"
+    elif indeks >= 25:
+        level, warna, emoji = "WASPADA", "#eab308", "🟡"
+    else:
+        level, warna, emoji = "NORMAL",  "#22c55e", "🟢"
+
+    return {
+        "indeks": indeks,
+        "level":  level,
+        "warna":  warna,
+        "emoji":  emoji,
+        "skor": {
+            "ch_h": round(s_ch, 1),
+            "cum3": round(s_c3, 1),
+            "cum7": round(s_c7, 1),
+            "rh":   round(s_rh, 1),
+            "et0":  round(s_et0,1),
+            "ws":   round(s_ws, 1),
+        },
+        "input": {
+            "ch_h": ch_h, "cum3": cum3, "cum7": cum7,
+            "rh": rh, "et0": et0, "ws": ws,
+        },
+        "threshold": THRESHOLD,
+    }
+
 # ─── LAZY LOADING SEMUA DATA ─────────────────────────────────────────────────
 # Tidak ada data yang diload saat startup — semua lazy saat callback pertama kali
 # Ini mencegah timeout Gunicorn saat deploy di Render free tier
@@ -576,6 +655,8 @@ app.layout = html.Div([
     dcc.Store(id="store-cap"),
     dcc.Store(id="store-health"),
     dcc.Store(id="store-micromet"),
+    dcc.Store(id="store-risiko"),
+    dcc.Interval(id="interval-risiko", interval=1_800_000, n_intervals=0),  # 30 menit
     dcc.Interval(id="interval-micromet", interval=3_600_000, n_intervals=0),  # 1 jam
     # map layers pakai file lokal (tidak perlu store/interval)
     dcc.Interval(id="interval-health", interval=300_000, n_intervals=0),  # 5 menit
@@ -2148,6 +2229,173 @@ def toggle_cuaca(n):
         "fontWeight":   "600" if on else "400",
     }
     return _make_zone_layer(ZONA_CUACA, on), style
+
+# ─── CALLBACK: HITUNG INDEKS RISIKO ──────────────────────────────────────────
+@app.callback(
+    Output("store-risiko", "data"),
+    Input("interval-risiko", "n_intervals"),
+)
+def update_risiko_store(_):
+    """
+    Hitung indeks risiko setiap 30 menit.
+    Ambil data real-time dari Open-Meteo + CHIRPS Supabase.
+    """
+    try:
+        # Ambil data Open-Meteo untuk RH, ET0, WS real-time
+        om = fetch_openmeteo()
+        curr = om.get("current", {})
+        rh   = float(curr.get("relative_humidity_2m", 80) or 80)
+        ws   = float(curr.get("wind_speed_10m", 2) or 2) / 3.6  # km/h → m/s
+        et0  = float(om.get("daily", {}).get("et0_fao_evapotranspiration", [3])[0] or 3)
+
+        # Ambil CH harian terbaru dari Supabase
+        global _df_hist_cache
+        if _df_hist_cache is None:
+            _df_hist_cache = load_historical()
+
+        ch_h, cum3, cum7 = 0.0, 0.0, 0.0
+        if _df_hist_cache is not None and len(_df_hist_cache) > 0:
+            df = _df_hist_cache.sort_values("date")
+            if len(df) >= 1:
+                ch_h = float(df.iloc[-1]["rainfall"] or 0)
+            if len(df) >= 3:
+                cum3 = float(df.iloc[-3:]["rainfall"].sum() or 0)
+            if len(df) >= 7:
+                cum7 = float(df.iloc[-7:]["rainfall"].sum() or 0)
+
+        hasil = hitung_indeks_risiko(ch_h, cum3, cum7, rh, et0, ws)
+        hasil["updated_at"] = datetime.now(WIB).strftime("%d %b %Y %H:%M WIB")
+        return hasil
+
+    except Exception as e:
+        print(f"⚠️  Indeks risiko error: {e}")
+        return hitung_indeks_risiko(0, 0, 0)
+
+# ─── CALLBACK: TAMPILKAN GAUGE INDEKS RISIKO ──────────────────────────────────
+@app.callback(
+    [Output("risiko-gauge",       "figure"),
+     Output("risiko-level-badge", "children"),
+     Output("risiko-breakdown",   "children"),
+     Output("risiko-bars",        "children"),
+     Output("risiko-updated",     "children")],
+    Input("store-risiko", "data"),
+)
+def update_risiko_display(data):
+    if not data:
+        data = hitung_indeks_risiko(0, 0, 0)
+
+    indeks = data.get("indeks", 0)
+    level  = data.get("level",  "NORMAL")
+    warna  = data.get("warna",  "#22c55e")
+    emoji  = data.get("emoji",  "🟢")
+    skor   = data.get("skor",   {})
+    inp    = data.get("input",  {})
+    updated= data.get("updated_at", "-")
+
+    # ── Gauge meter ──────────────────────────────────────────────
+    fig = go.Figure(go.Indicator(
+        mode  = "gauge+number",
+        value = indeks,
+        title = {"text": "Indeks Risiko", "font": {"size": 13, "color": "#94a3b8"}},
+        number= {"font": {"size": 32, "color": warna}, "suffix": ""},
+        gauge = {
+            "axis":  {"range": [0, 100], "tickwidth": 1,
+                      "tickcolor": "#334155", "tickfont": {"size": 9}},
+            "bar":   {"color": warna, "thickness": 0.25},
+            "bgcolor": "#0f172a",
+            "borderwidth": 1,
+            "bordercolor": "#1e293b",
+            "steps": [
+                {"range": [0,  25], "color": "#14532d33"},
+                {"range": [25, 50], "color": "#78350f33"},
+                {"range": [50, 75], "color": "#9a3412 33"},
+                {"range": [75,100], "color": "#7f1d1d33"},
+            ],
+            "threshold": {
+                "line":  {"color": warna, "width": 3},
+                "thickness": 0.75,
+                "value": indeks,
+            },
+        },
+    ))
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor ="rgba(0,0,0,0)",
+        margin=dict(l=20, r=20, t=40, b=10),
+        font=dict(color="#94a3b8"),
+    )
+
+    # ── Badge level ───────────────────────────────────────────────
+    badge = html.Div([
+        html.Span(f"{emoji} {level}",
+                  style={"fontSize": "22px", "fontWeight": "800",
+                         "color": warna}),
+        html.Br(),
+        html.Span(f"Indeks: {indeks}/100",
+                  style={"fontSize": "12px", "color": "#94a3b8"}),
+    ])
+
+    # ── Breakdown nilai input ──────────────────────────────────────
+    breakdown = html.Table([
+        html.Tbody([
+            html.Tr([
+                html.Td("CH Harian",      style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
+                html.Td(f"{inp.get('ch_h',0):.1f} mm", style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
+            ]),
+            html.Tr([
+                html.Td("Kumulatif 3 Hari", style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
+                html.Td(f"{inp.get('cum3',0):.1f} mm", style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
+            ]),
+            html.Tr([
+                html.Td("Kumulatif 7 Hari", style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
+                html.Td(f"{inp.get('cum7',0):.1f} mm", style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
+            ]),
+            html.Tr([
+                html.Td("Kelembaban Udara", style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
+                html.Td(f"{inp.get('rh',0):.0f}%",    style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
+            ]),
+            html.Tr([
+                html.Td("Evapotranspirasi", style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
+                html.Td(f"{inp.get('et0',0):.1f} mm", style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
+            ]),
+            html.Tr([
+                html.Td("Kec. Angin",      style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
+                html.Td(f"{inp.get('ws',0):.1f} m/s", style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
+            ]),
+        ])
+    ])
+
+    # ── Progress bar per parameter ────────────────────────────────
+    param_config = [
+        ("CH Harian",       skor.get("ch_h",0), 30,  "#3b82f6"),
+        ("Kum. 3 Hari",     skor.get("cum3",0), 25,  "#8b5cf6"),
+        ("Kum. 7 Hari",     skor.get("cum7",0), 20,  "#06b6d4"),
+        ("Kelembaban",      skor.get("rh",  0), 15,  "#10b981"),
+        ("Evapotranspirasi",skor.get("et0", 0),  5,  "#f59e0b"),
+        ("Angin",           skor.get("ws",  0),  5,  "#ef4444"),
+    ]
+
+    bars = []
+    for label, nilai, max_w, color in param_config:
+        pct = (nilai / max_w * 100) if max_w > 0 else 0
+        bars.append(html.Div([
+            html.Div([
+                html.Span(label, style={"fontSize":"10px","color":"#94a3b8","width":"130px","display":"inline-block"}),
+                html.Span(f"{nilai:.1f}/{max_w}", style={"fontSize":"10px","color":"#64748b","marginLeft":"4px"}),
+            ], style={"display":"flex","alignItems":"center","marginBottom":"2px"}),
+            html.Div([
+                html.Div(style={
+                    "width": f"{min(pct,100):.0f}%",
+                    "height": "6px",
+                    "background": color,
+                    "borderRadius": "3px",
+                    "transition": "width 0.5s ease",
+                }),
+            ], style={"background":"#1e293b","borderRadius":"3px","height":"6px","marginBottom":"6px"}),
+        ]))
+
+    updated_text = f"🕐 Update: {updated} | Interval: 30 menit"
+    return fig, badge, breakdown, bars, updated_text
 
 # ─── CALLBACK: UPDATE MICROMET STORE ─────────────────────────────────────────
 @app.callback(
