@@ -1,0 +1,69 @@
+name: 🛰️ NASA POWER Mikrometeorologi Update
+
+on:
+  # Setiap hari jam 09.00 WIB (02.00 UTC)
+  # Sedikit lebih lambat dari CHIRPS agar tidak bentrok
+  schedule:
+    - cron: '0 2 * * *'
+
+  # Tombol manual dari GitHub Actions
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Mode update'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - backfill
+          - historical
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  update-micromet:
+    name: Download NASA POWER & Simpan ke Supabase
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install dependencies
+        run: pip install requests pandas
+
+      - name: 🔍 Cek credentials
+        env:
+          SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ]; then
+            echo "❌ SUPABASE_URL belum diset!"
+            exit 1
+          fi
+          echo "✅ Credentials OK"
+
+      - name: 🛰️ Download NASA POWER & Simpan ke Supabase
+        env:
+          SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          TZ: Asia/Jakarta
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "backfill" ]; then
+            echo "Mode: Backfill 30 hari"
+            python nasa_power_update.py --backfill --days 30
+          elif [ "${{ github.event.inputs.mode }}" = "historical" ]; then
+            echo "Mode: Historical 1981-sekarang"
+            python nasa_power_update.py --historical
+          else
+            echo "Mode: Daily update"
+            python nasa_power_update.py --daily
+          fi
+          echo "✅ Selesai!"
