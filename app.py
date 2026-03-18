@@ -72,46 +72,53 @@ THRESHOLD = {
     "AWAS":     150,   # >150 mm/hari
 }
 
-# ─── LOAD GEOJSON BATAS DESA PETIR ───────────────────────────────────────────
-# Sumber: BIG – Batas Wilayah Kelurahan/Desa 10K, Delineasi 2017
-# Kode: 32.01.30.2005 (Desa Petir, Kec. Dramaga, Kab. Bogor)
+# ─── LAZY LOADING SEMUA DATA ─────────────────────────────────────────────────
+# Tidak ada data yang diload saat startup — semua lazy saat callback pertama kali
+# Ini mencegah timeout Gunicorn saat deploy di Render free tier
 import json as _json
 
+# ── GeoJSON Batas Desa (file lokal — cepat, tidak perlu lazy) ─────────────────
 def load_desa_geojson():
-    """Load file GeoJSON batas Desa Petir dari BIG."""
     try:
         with open("desapetir.json", "r", encoding="utf-8") as f:
-            data = _json.load(f)
-        print(f"✅ GeoJSON Desa Petir loaded: "
-              f"{len(data.get('features', []))} feature, "
-              f"luas 4.27 km²")
-        return data
+            return _json.load(f)
     except Exception as e:
-        print(f"⚠️  GeoJSON tidak ditemukan: {e}")
+        print(f"⚠️  desapetir.json tidak ditemukan: {e}")
         return None
-
-DESA_GEOJSON = load_desa_geojson()
 
 def load_slope_geojson():
-    """Load file GeoJSON kemiringan lereng Kec. Dramaga."""
     try:
         with open("slope_dramaga.json", "r", encoding="utf-8") as f:
-            data = _json.load(f)
-        features = data.get("features", [])
-        print(f"✅ Slope GeoJSON loaded: {len(features)} kelas kemiringan")
-        return data
+            return _json.load(f)
     except Exception as e:
-        print(f"⚠️  Slope GeoJSON tidak ditemukan: {e}")
+        print(f"⚠️  slope_dramaga.json tidak ditemukan: {e}")
         return None
 
-SLOPE_GEOJSON = load_slope_geojson()
+DESA_GEOJSON  = load_desa_geojson()   # File lokal kecil — OK di startup
+SLOPE_GEOJSON = load_slope_geojson()  # File lokal 1.6MB — OK di startup
 
-# ─── LOAD HISTORICAL DATA (dari Supabase via db.py) ───────────────────────────
-# Sumber: Supabase database + CHIRPS NASA (auto-update harian via GitHub Actions)
-# Fallback otomatis ke CSV lokal jika Supabase tidak tersedia
+# ── CHIRPS Historical (Supabase — LAZY, tidak diload saat startup) ─────────────
 from db import load_historical
 
-df_hist = load_historical()
+_df_hist_cache = None  # Cache global
+
+def get_hist_data():
+    """Lazy load data CHIRPS — fetch dari Supabase sekali, cache selamanya."""
+    global _df_hist_cache
+    if _df_hist_cache is not None:
+        return _df_hist_cache
+    try:
+        print("🔄 Loading CHIRPS data (lazy)...")
+        _df_hist_cache = load_historical()
+        print(f"✅ CHIRPS loaded: {len(_df_hist_cache):,} baris")
+        return _df_hist_cache
+    except Exception as e:
+        print(f"⚠️  CHIRPS load error: {e}")
+        return None
+
+# df_hist tetap ada sebagai alias untuk backward compatibility
+# tapi diisi secara lazy
+df_hist = None  # Diisi saat pertama kali callback dipanggil
 
 # ─── LOAD DATA MIKROMETEOROLOGI NASA POWER (LAZY) ────────────────────────────
 # Tidak diload saat startup — diload saat pertama kali callback dipanggil
@@ -1095,13 +1102,11 @@ app.layout = html.Div([
                         ),
                         dcc.RangeSlider(
                             id="year-range",
-                            min=int(df_hist["year"].min()),
-                            max=int(df_hist["year"].max()),
+                            min=2005,
+                            max=2026,
                             step=1,
-                            value=[int(df_hist["year"].min()), int(df_hist["year"].max())],
-                            marks={y: str(y) for y in range(
-                                int(df_hist["year"].min()),
-                                int(df_hist["year"].max()) + 1, 5)},
+                            value=[2005, 2026],
+                            marks={y: str(y) for y in range(2005, 2027, 5)},
                             tooltip={"always_visible": False},
                         ),
                     ], style={"display": "flex", "alignItems": "center", "gap": "16px", "flexWrap": "wrap"}),
@@ -1427,6 +1432,11 @@ def update_forecast(_):
      Input("year-range", "value")],
 )
 def update_historical(view, year_range):
+    global df_hist
+    if df_hist is None:
+        df_hist = get_hist_data()
+    if df_hist is None:
+        return go.Figure()
     df = df_hist[(df_hist["year"] >= year_range[0]) & (df_hist["year"] <= year_range[1])].copy()
 
     DARK = dict(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -1506,6 +1516,11 @@ def update_historical(view, year_range):
     Input("year-range", "value"),
 )
 def update_stat_cards(year_range):
+    global df_hist
+    if df_hist is None:
+        df_hist = get_hist_data()
+    if df_hist is None:
+        return []
     df = df_hist[(df_hist["year"] >= year_range[0]) & (df_hist["year"] <= year_range[1])]
     stats = [
         ("📅 Total Hari",        f"{len(df):,}",    "#3b82f6"),
@@ -1589,6 +1604,9 @@ def update_fused_store(owm, meteo, bmkg):
     Input("year-range", "value"),
 )
 def update_hist_title(year_range):
+    global df_hist
+    if df_hist is None:
+        df_hist = get_hist_data()
     return f"📊 Analisis Tren Historis ({year_range[0]}–{year_range[1]})"
 
 # ─── CALLBACK: TAMPILKAN FUSION PANEL ─────────────────────────────────────────
