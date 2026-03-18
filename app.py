@@ -99,6 +99,17 @@ from db import load_historical
 
 df_hist = load_historical()
 
+# ─── LOAD DATA MIKROMETEOROLOGI NASA POWER ─────────────────────────────────────
+try:
+    from db_micromet import load_micromet, load_micromet_recent, get_micromet_stats
+    MICROMET_AVAILABLE = True
+    df_micromet = load_micromet()
+    print(f"✅ Micromet loaded: {len(df_micromet)} baris")
+except Exception as e:
+    print(f"⚠️  Micromet tidak tersedia: {e}")
+    MICROMET_AVAILABLE = False
+    df_micromet = None
+
 # ─── SIMULATED REAL-TIME BUFFER ────────────────────────────────────────────────
 # (Ganti dengan sensor / API aktual di produksi)
 realtime_buffer = deque(maxlen=288)   # 24 jam x 12 (5-menit interval)
@@ -527,6 +538,8 @@ app.layout = html.Div([
     dcc.Store(id="store-bmkg"),
     dcc.Store(id="store-cap"),
     dcc.Store(id="store-health"),
+    dcc.Store(id="store-micromet"),
+    dcc.Interval(id="interval-micromet", interval=3_600_000, n_intervals=0),  # 1 jam
     # map layers pakai file lokal (tidak perlu store/interval)
     dcc.Interval(id="interval-health", interval=300_000, n_intervals=0),  # 5 menit
     dcc.Interval(id="interval-cap", interval=1_800_000, n_intervals=0),  # 30 menit
@@ -1061,6 +1074,71 @@ app.layout = html.Div([
         # ── ROW 5: STATISTIK RINGKASAN ──────────────────────────────────────
         html.Div([
             html.Div(id="stat-cards",
+                     style={"display": "flex", "gap": "12px", "flexWrap": "wrap"}),
+        ], style={"marginBottom": "16px"}),
+
+        # ── ROW NASA POWER: DATA MIKROMETEOROLOGI ──────────────────────────────
+        html.Div([
+            html.Div([
+                html.Div([
+                    html.H3("🛰️ Data Mikrometeorologi Historis – NASA POWER",
+                            style={"color": "#38bdf8", "margin": "0",
+                                   "fontSize": "15px", "fontWeight": "600"}),
+                    html.Div([
+                        dcc.Dropdown(
+                            id="micromet-param",
+                            options=[
+                                {"label": "🌡️ Suhu Udara (Maks/Min/Rata)",  "value": "temp"},
+                                {"label": "💧 Kelembaban Udara",             "value": "rh"},
+                                {"label": "💨 Kecepatan Angin",              "value": "wind"},
+                                {"label": "☀️ Radiasi Matahari",             "value": "rad"},
+                                {"label": "🌿 Evapotranspirasi",             "value": "et0"},
+                                {"label": "🔵 Tekanan Udara",                "value": "pres"},
+                                {"label": "🌧️ CH NASA vs CHIRPS",            "value": "prec"},
+                            ],
+                            value="temp",
+                            clearable=False,
+                            style={"width": "240px", "fontSize": "13px"},
+                        ),
+                        dcc.RangeSlider(
+                            id="micromet-year-range",
+                            min=1981,
+                            max=2026,
+                            step=1,
+                            value=[2005, 2026],
+                            marks={y: str(y) for y in range(1981, 2027, 5)},
+                            tooltip={"always_visible": False},
+                        ),
+                    ], style={"display": "flex", "alignItems": "center",
+                              "gap": "16px", "flexWrap": "wrap"}),
+                ], style={"display": "flex", "justifyContent": "space-between",
+                          "alignItems": "center", "marginBottom": "12px",
+                          "flexWrap": "wrap", "gap": "12px"}),
+                dcc.Graph(id="chart-micromet", config={"displayModeBar": True},
+                          style={"height": "300px"}),
+                # Info sumber data
+                html.Div([
+                    html.Span("© Sumber: ", style={"fontSize": "10px", "color": "#475569"}),
+                    html.A("NASA POWER – Prediction Of Worldwide Energy Resources",
+                           href="https://power.larc.nasa.gov",
+                           target="_blank",
+                           style={"fontSize": "10px", "color": "#38bdf8",
+                                  "textDecoration": "none"}),
+                    html.Span(" | Resolusi: Harian | Koordinat: -6.6121°S, 106.7231°E",
+                              style={"fontSize": "10px", "color": "#475569"}),
+                ], style={"marginTop": "8px"}),
+            ], style={
+                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
+                "border": "1px solid #1e40af33",
+                "borderRadius": "12px",
+                "padding": "20px",
+                "flex": "1",
+            }),
+        ], style={"display": "flex", "gap": "16px", "marginBottom": "16px"}),
+
+        # ── ROW STATISTIK MICROMET ───────────────────────────────────────────
+        html.Div([
+            html.Div(id="micromet-stat-cards",
                      style={"display": "flex", "gap": "12px", "flexWrap": "wrap"}),
         ], style={"marginBottom": "16px"}),
 
@@ -1913,6 +1991,198 @@ def toggle_cuaca(n):
         "fontWeight":   "600" if on else "400",
     }
     return _make_zone_layer(ZONA_CUACA, on), style
+
+# ─── CALLBACK: UPDATE MICROMET STORE ─────────────────────────────────────────
+@app.callback(
+    Output("store-micromet", "data"),
+    Input("interval-micromet", "n_intervals"),
+)
+def update_micromet_store(_):
+    if not MICROMET_AVAILABLE:
+        return {"available": False}
+    stats = get_micromet_stats()
+    return {"available": True, "stats": stats}
+
+# ─── CALLBACK: GRAFIK MIKROMETEOROLOGI ────────────────────────────────────────
+@app.callback(
+    Output("chart-micromet", "figure"),
+    [Input("micromet-param",      "value"),
+     Input("micromet-year-range", "value")],
+)
+def update_micromet_chart(param, year_range):
+    DARK = dict(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#94a3b8", size=11),
+        margin=dict(l=50, r=20, t=30, b=40),
+        hovermode="x unified",
+        legend=dict(orientation="h", y=-0.3),
+    )
+
+    # Cek data tersedia
+    if df_micromet is None or len(df_micromet) == 0:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="⚠️ Data NASA POWER belum tersedia.<br>"
+                 "Jalankan: python nasa_power_update.py --historical",
+            xref="paper", yref="paper", x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=13, color="#94a3b8"),
+        )
+        fig.update_layout(**DARK)
+        return fig
+
+    # Filter tahun
+    df = df_micromet[
+        (df_micromet["year"] >= year_range[0]) &
+        (df_micromet["year"] <= year_range[1])
+    ].copy()
+
+    if len(df) == 0:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="Tidak ada data untuk rentang tahun ini",
+            xref="paper", yref="paper", x=0.5, y=0.5,
+            showarrow=False, font=dict(color="#94a3b8"))
+        fig.update_layout(**DARK)
+        return fig
+
+    # Resample bulanan untuk grafik lebih bersih
+    df_m = df.set_index("date").resample("ME").mean(numeric_only=True).reset_index()
+
+    fig = go.Figure()
+
+    if param == "temp":
+        if "t2m_max" in df_m.columns:
+            fig.add_trace(go.Scatter(x=df_m["date"], y=df_m["t2m_max"],
+                name="Suhu Maks (°C)", line=dict(color="#ef4444", width=1.5)))
+        if "t2m" in df_m.columns:
+            fig.add_trace(go.Scatter(x=df_m["date"], y=df_m["t2m"],
+                name="Suhu Rata (°C)", line=dict(color="#f97316", width=2)))
+        if "t2m_min" in df_m.columns:
+            fig.add_trace(go.Scatter(x=df_m["date"], y=df_m["t2m_min"],
+                name="Suhu Min (°C)", line=dict(color="#3b82f6", width=1.5)))
+        fig.update_layout(title="Tren Suhu Udara Bulanan (°C)",
+                          yaxis=dict(title="°C", showgrid=True, gridcolor="#1e293b"),
+                          xaxis=dict(showgrid=False), **DARK)
+
+    elif param == "rh":
+        if "rh2m" in df_m.columns:
+            fig.add_trace(go.Scatter(x=df_m["date"], y=df_m["rh2m"],
+                name="Kelembaban Udara (%)",
+                line=dict(color="#38bdf8", width=2),
+                fill="tozeroy", fillcolor="rgba(56,189,248,0.1)"))
+        fig.update_layout(title="Tren Kelembaban Udara Bulanan (%)",
+                          yaxis=dict(title="%", showgrid=True, gridcolor="#1e293b",
+                                     range=[50, 100]),
+                          xaxis=dict(showgrid=False), **DARK)
+
+    elif param == "wind":
+        if "ws2m" in df_m.columns:
+            fig.add_trace(go.Scatter(x=df_m["date"], y=df_m["ws2m"],
+                name="Kecepatan Angin (m/s)",
+                line=dict(color="#8b5cf6", width=2)))
+        fig.update_layout(title="Tren Kecepatan Angin Bulanan (m/s)",
+                          yaxis=dict(title="m/s", showgrid=True, gridcolor="#1e293b"),
+                          xaxis=dict(showgrid=False), **DARK)
+
+    elif param == "rad":
+        if "radiation" in df_m.columns:
+            fig.add_trace(go.Scatter(x=df_m["date"], y=df_m["radiation"],
+                name="Radiasi Matahari (MJ/m²)",
+                line=dict(color="#eab308", width=2),
+                fill="tozeroy", fillcolor="rgba(234,179,8,0.1)"))
+        fig.update_layout(title="Tren Radiasi Matahari Bulanan (MJ/m²/hari)",
+                          yaxis=dict(title="MJ/m²", showgrid=True, gridcolor="#1e293b"),
+                          xaxis=dict(showgrid=False), **DARK)
+
+    elif param == "et0":
+        if "et0" in df_m.columns:
+            fig.add_trace(go.Scatter(x=df_m["date"], y=df_m["et0"],
+                name="Evapotranspirasi (mm/hari)",
+                line=dict(color="#10b981", width=2),
+                fill="tozeroy", fillcolor="rgba(16,185,129,0.1)"))
+        fig.update_layout(title="Tren Evapotranspirasi Bulanan (mm/hari)",
+                          yaxis=dict(title="mm/hari", showgrid=True, gridcolor="#1e293b"),
+                          xaxis=dict(showgrid=False), **DARK)
+
+    elif param == "pres":
+        if "pressure" in df_m.columns:
+            fig.add_trace(go.Scatter(x=df_m["date"], y=df_m["pressure"],
+                name="Tekanan Udara (kPa)",
+                line=dict(color="#06b6d4", width=2)))
+        fig.update_layout(title="Tren Tekanan Udara Bulanan (kPa)",
+                          yaxis=dict(title="kPa", showgrid=True, gridcolor="#1e293b"),
+                          xaxis=dict(showgrid=False), **DARK)
+
+    elif param == "prec":
+        # Bandingkan CH NASA POWER vs CHIRPS
+        if "prec_nasa" in df_m.columns:
+            fig.add_trace(go.Bar(x=df_m["date"], y=df_m["prec_nasa"],
+                name="CH NASA POWER (mm)", marker_color="#38bdf8", opacity=0.7))
+
+        # Overlay CHIRPS jika tersedia
+        try:
+            df_chirps = df_hist[
+                (df_hist["year"] >= year_range[0]) &
+                (df_hist["year"] <= year_range[1])
+            ].set_index("date").resample("ME")["rainfall"].sum().reset_index()
+            # Konversi total bulanan ke rata-rata harian
+            df_chirps["rainfall_daily"] = df_chirps["rainfall"] / 30
+            fig.add_trace(go.Scatter(x=df_chirps["date"], y=df_chirps["rainfall_daily"],
+                name="CH CHIRPS (mm/hari rata)", line=dict(color="#f97316", width=2)))
+        except Exception:
+            pass
+
+        fig.update_layout(title="Perbandingan CH NASA POWER vs CHIRPS (mm/hari)",
+                          yaxis=dict(title="mm/hari", showgrid=True, gridcolor="#1e293b"),
+                          xaxis=dict(showgrid=False), barmode="overlay", **DARK)
+
+    return fig
+
+# ─── CALLBACK: STATISTIK MICROMET ─────────────────────────────────────────────
+@app.callback(
+    Output("micromet-stat-cards", "children"),
+    Input("store-micromet", "data"),
+)
+def update_micromet_stats(data):
+    if not MICROMET_AVAILABLE or df_micromet is None or len(df_micromet) == 0:
+        return [html.Div(
+            "⚠️ Data NASA POWER belum tersedia. Jalankan nasa_power_update.py --historical",
+            style={"color": "#f59e0b", "fontSize": "12px", "padding": "10px",
+                   "background": "#1e293b", "borderRadius": "8px"}
+        )]
+
+    stats_data = [
+        ("🌡️ Suhu Rata-rata",  f"{df_micromet['t2m'].mean():.1f}°C",     "#ef4444"),
+        ("💧 Kelembaban Rata", f"{df_micromet['rh2m'].mean():.1f}%",      "#38bdf8"),
+        ("💨 Angin Rata-rata", f"{df_micromet['ws2m'].mean():.1f} m/s",   "#8b5cf6"),
+        ("☀️ Radiasi Rata",    f"{df_micromet['radiation'].mean():.1f} MJ",  "#eab308"),
+        ("🌿 ET0 Rata-rata",   f"{df_micromet['et0'].mean():.1f} mm/hr",  "#10b981"),
+        ("📅 Rentang Data",
+         f"{df_micromet['date'].min().year}–{df_micromet['date'].max().year}",
+         "#06b6d4"),
+    ]
+
+    cards = []
+    for label, value, color in stats_data:
+        cards.append(html.Div([
+            html.Div(label, style={"fontSize": "11px", "color": "#94a3b8",
+                                   "textTransform": "uppercase"}),
+            html.Div(value, style={"fontSize": "18px", "fontWeight": "700",
+                                   "color": "#f1f5f9", "marginTop": "4px"}),
+            html.Div("© NASA POWER", style={"fontSize": "9px", "color": "#475569",
+                                            "marginTop": "4px"}),
+        ], style={
+            "background": "linear-gradient(135deg, #1e293b, #0f172a)",
+            "border":      f"1px solid {color}44",
+            "borderRadius": "10px",
+            "padding":     "14px 18px",
+            "flex":        "1",
+            "minWidth":    "130px",
+            "boxShadow":   f"0 2px 12px {color}22",
+        }))
+    return cards
 
 # ─── CALLBACK: UPDATE HEALTH STORE ───────────────────────────────────────────
 @app.callback(
