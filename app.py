@@ -91,8 +91,8 @@ THRESHOLD = {
     "ws":    {"waspada": 4,  "siaga": 7,  "awas": 10},    # m/s
 }
 
-# Bobot parameter (total = 100)
-WEIGHTS = {
+# Bobot parameter indeks risiko (total = 100)
+RISIKO_WEIGHTS = {
     "ch_h": 30,   # CH harian       — korelasi 0.459 data lokal
     "cum3": 25,   # Kumulatif 3 hr  — API antecedent, PVMBG
     "cum7": 20,   # Kumulatif 7 hr  — Soil saturation, Van Westen
@@ -117,12 +117,12 @@ def hitung_indeks_risiko(ch_h, cum3, cum7, rh=80, et0=3.0, ws=2.0):
         dict: indeks, level, warna, skor_per_parameter
     """
     # Normalisasi tiap parameter ke 0–1 lalu kali bobot
-    s_ch  = min(ch_h  / THRESHOLD["ch_h"]["awas"], 1.0) * WEIGHTS["ch_h"]
-    s_c3  = min(cum3  / THRESHOLD["cum3"]["awas"], 1.0) * WEIGHTS["cum3"]
-    s_c7  = min(cum7  / THRESHOLD["cum7"]["awas"], 1.0) * WEIGHTS["cum7"]
-    s_rh  = max(rh - 70, 0) / 30 * WEIGHTS["rh"]   # >70% mulai berisiko
-    s_et0 = max(5 - et0, 0) / 5  * WEIGHTS["et0"]  # ET0 rendah = tanah jenuh
-    s_ws  = min(ws / 10, 1.0)    * WEIGHTS["ws"]
+    s_ch  = min(ch_h  / THRESHOLD["ch_h"]["awas"], 1.0) * RISIKO_WEIGHTS["ch_h"]
+    s_c3  = min(cum3  / THRESHOLD["cum3"]["awas"], 1.0) * RISIKO_WEIGHTS["cum3"]
+    s_c7  = min(cum7  / THRESHOLD["cum7"]["awas"], 1.0) * RISIKO_WEIGHTS["cum7"]
+    s_rh  = max(rh - 70, 0) / 30 * RISIKO_WEIGHTS["rh"]   # >70% mulai berisiko
+    s_et0 = max(5 - et0, 0) / 5  * RISIKO_WEIGHTS["et0"]  # ET0 rendah = tanah jenuh
+    s_ws  = min(ws / 10, 1.0)    * RISIKO_WEIGHTS["ws"]
 
     indeks = round(s_ch + s_c3 + s_c7 + s_rh + s_et0 + s_ws, 1)
     indeks = max(0, min(100, indeks))  # Clamp 0–100
@@ -220,21 +220,26 @@ except ImportError as e:
 
 df_micromet = None  # Diload lazy saat callback pertama kali
 
+_df_micromet_lock = _threading.Lock()
+
 def get_micromet_data():
-    """Lazy load data micromet — hanya fetch sekali lalu cache."""
+    """Lazy load data micromet — hanya fetch sekali lalu cache (thread-safe)."""
     global df_micromet
     if df_micromet is not None:
         return df_micromet
     if not MICROMET_AVAILABLE:
         return None
-    try:
-        print("🔄 Loading micromet data (lazy)...")
-        df_micromet = load_micromet()
-        print(f"✅ Micromet loaded: {len(df_micromet)} baris")
-        return df_micromet
-    except Exception as e:
-        print(f"⚠️  Micromet load error: {e}")
-        return None
+    with _df_micromet_lock:
+        if df_micromet is not None:
+            return df_micromet
+        try:
+            print("🔄 Loading micromet data (lazy)...")
+            df_micromet = load_micromet()
+            print(f"✅ Micromet loaded: {len(df_micromet)} baris")
+            return df_micromet
+        except Exception as e:
+            print(f"⚠️  Micromet load error: {e}")
+            return None
 
 # ─── SIMULATED REAL-TIME BUFFER ────────────────────────────────────────────────
 # (Ganti dengan sensor / API aktual di produksi)
