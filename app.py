@@ -92,6 +92,20 @@ def load_desa_geojson():
 
 DESA_GEOJSON = load_desa_geojson()
 
+def load_slope_geojson():
+    """Load file GeoJSON kemiringan lereng Kec. Dramaga."""
+    try:
+        with open("slope_dramaga.json", "r", encoding="utf-8") as f:
+            data = _json.load(f)
+        features = data.get("features", [])
+        print(f"✅ Slope GeoJSON loaded: {len(features)} kelas kemiringan")
+        return data
+    except Exception as e:
+        print(f"⚠️  Slope GeoJSON tidak ditemukan: {e}")
+        return None
+
+SLOPE_GEOJSON = load_slope_geojson()
+
 # ─── LOAD HISTORICAL DATA (dari Supabase via db.py) ───────────────────────────
 # Sumber: Supabase database + CHIRPS NASA (auto-update harian via GitHub Actions)
 # Fallback otomatis ke CSV lokal jika Supabase tidak tersedia
@@ -924,6 +938,13 @@ app.layout = html.Div([
                                            "border": "1px solid #334155",
                                            "borderRadius": "6px", "padding": "3px 10px",
                                            "cursor": "pointer", "fontSize": "11px"}),
+                        html.Button("🏔️ Kemiringan Lereng", id="btn-layer-slope",
+                                    n_clicks=1,
+                                    style={"background": "#78716c33", "color": "#a8a29e",
+                                           "border": "1px solid #78716c",
+                                           "borderRadius": "6px", "padding": "3px 10px",
+                                           "cursor": "pointer", "fontSize": "11px",
+                                           "fontWeight": "600"}),
                         html.Button("🏘️ Batas Desa", id="btn-layer-desa",
                                     n_clicks=1,
                                     style={"background": "#f59e0b33", "color": "#f59e0b",
@@ -948,6 +969,8 @@ app.layout = html.Div([
                     dl.LayerGroup(id="layer-banjir"),
                     # Layer Risiko Cuaca Ekstrim (default off)
                     dl.LayerGroup(id="layer-cuaca-ekstrim"),
+                    # Layer kemiringan lereng (Puslittanak 2004)
+                    dl.LayerGroup(id="layer-slope"),
                     # Layer batas desa dari BIG (diupdate via callback)
                     dl.LayerGroup(id="layer-batas-desa"),
                     # Marker lokasi Desa Petir
@@ -979,7 +1002,15 @@ app.layout = html.Div([
                         html.Span("Banjir Tinggi", style={"marginRight": "10px"}),
                         html.Span("─", style={"color": "#f59e0b", "marginRight": "3px",
                                               "fontWeight": "700"}),
-                        html.Span("Batas Desa"),
+                        html.Span("Batas Desa", style={"marginRight": "10px"}),
+                        html.Span("■", style={"color": "#22c55e", "marginRight": "3px"}),
+                        html.Span("Datar", style={"marginRight": "6px"}),
+                        html.Span("■", style={"color": "#eab308", "marginRight": "3px"}),
+                        html.Span("Landai", style={"marginRight": "6px"}),
+                        html.Span("■", style={"color": "#f97316", "marginRight": "3px"}),
+                        html.Span("Agak Curam", style={"marginRight": "6px"}),
+                        html.Span("■", style={"color": "#ef4444", "marginRight": "3px"}),
+                        html.Span("Curam"),
                     ], style={"fontSize": "11px", "color": "#94a3b8"}),
                     html.Div([
                         html.Span("© Sumber: ", style={"color": "#475569", "fontSize": "10px"}),
@@ -1883,6 +1914,98 @@ def render_batas_desa(n_desa):
             )
         )
     return children
+
+# ─── CALLBACK: RENDER LAYER KEMIRINGAN LERENG ────────────────────────────────
+SLOPE_COLORS = {
+    1: {"color": "#22c55e", "label": "Datar (0–8%)",        "fill": "#22c55e"},
+    2: {"color": "#eab308", "label": "Landai (8–15%)",       "fill": "#eab308"},
+    3: {"color": "#f97316", "label": "Agak Curam (15–25%)",  "fill": "#f97316"},
+    4: {"color": "#ef4444", "label": "Curam (25–45%)",       "fill": "#ef4444"},
+    5: {"color": "#7f1d1d", "label": "Sangat Curam (>45%)",  "fill": "#7f1d1d"},
+}
+
+@app.callback(
+    [Output("layer-slope",     "children"),
+     Output("btn-layer-slope", "style")],
+    Input("btn-layer-slope", "n_clicks"),
+)
+def toggle_slope(n):
+    on = (n or 0) % 2 == 1
+    style = {
+        "background":   "#78716c33" if on else "#1e293b",
+        "color":        "#a8a29e"   if on else "#64748b",
+        "border":       f"1px solid {'#78716c' if on else '#334155'}",
+        "borderRadius": "6px", "padding": "3px 10px",
+        "cursor":       "pointer", "fontSize": "11px",
+        "fontWeight":   "600" if on else "400",
+    }
+
+    if not on or not SLOPE_GEOJSON:
+        return [], style
+
+    children = []
+    seen_codes = set()
+
+    for feature in SLOPE_GEOJSON.get("features", []):
+        props   = feature.get("properties", {})
+        code    = props.get("gridcode", 0)
+        kelas   = props.get("Kelas_Lere", f"Kelas {code}").title()
+        persen  = props.get("Kemiringan", "-")
+        source  = props.get("Source", "DEM SRTM 30m")
+        cfg     = SLOPE_COLORS.get(code, {"color": "#64748b", "fill": "#64748b",
+                                          "label": kelas})
+
+        # Label untuk tooltip
+        label_map = {
+            1: "🟢 Datar",
+            2: "🟡 Landai",
+            3: "🟠 Agak Curam",
+            4: "🔴 Curam",
+            5: "⛔ Sangat Curam",
+        }
+        icon_label = label_map.get(code, kelas)
+
+        children.append(
+            dl.GeoJSON(
+                data=feature,
+                style={
+                    "color":       cfg["color"],
+                    "weight":      1,
+                    "fillColor":   cfg["fill"],
+                    "fillOpacity": 0.45,
+                },
+                children=[
+                    dl.Tooltip(html.Div([
+                        html.B(f"{icon_label}",
+                               style={"color": cfg["color"], "fontSize": "13px"}),
+                        html.Br(),
+                        html.Span(f"Kemiringan: {persen}",
+                                  style={"fontSize": "11px"}),
+                        html.Br(),
+                        html.Span(f"Klasifikasi: Puslittanak Bogor (2004)",
+                                  style={"fontSize": "10px", "color": "#94a3b8"}),
+                        html.Br(),
+                        html.Span(f"Sumber: {source}",
+                                  style={"fontSize": "10px", "color": "#94a3b8"}),
+                    ])),
+                    dl.Popup(html.Div([
+                        html.H4(f"{icon_label}",
+                                style={"margin": "0 0 8px", "color": cfg["color"]}),
+                        html.Table([
+                            html.Tr([html.Td("Kemiringan"),
+                                     html.Td(f": {persen}")]),
+                            html.Tr([html.Td("Klasifikasi"),
+                                     html.Td(": Puslittanak (2004)")]),
+                            html.Tr([html.Td("Sumber DEM"),
+                                     html.Td(f": {source}")]),
+                            html.Tr([html.Td("Provider"),
+                                     html.Td(": © indonesia-geospasial.com")]),
+                        ], style={"fontSize": "11px", "borderSpacing": "4px"}),
+                    ], style={"minWidth": "200px"})),
+                ],
+            )
+        )
+    return children, style
 
 # ─── CALLBACK: TOGGLE LAYER LONGSOR ───────────────────────────────────────────
 # ─── DATA ZONA RAWAN BERBASIS BNPB INARISK (KABUPATEN BOGOR) ─────────────────
