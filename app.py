@@ -737,7 +737,7 @@ app.layout = html.Div([
                         html.Div("🌡 Suhu", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
                         html.Div([
                             html.Span(id="fused-temp", style={"fontSize":"22px","fontWeight":"800","color":"#ef4444"}),
-                            html.Span(" K", style={"fontSize":"11px","color":"#64748b"}),
+                            html.Span(" °C", style={"fontSize":"11px","color":"#64748b"}),
                         ]),
                         html.Div(id="fused-temp-breakdown", style={"fontSize":"9px","marginTop":"4px"}),
                     ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
@@ -757,7 +757,7 @@ app.layout = html.Div([
                         html.Div("🌧 CH", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
                         html.Div([
                             html.Span(id="fused-rain", style={"fontSize":"22px","fontWeight":"800","color":"#06b6d4"}),
-                            html.Span(" mm/h", style={"fontSize":"11px","color":"#64748b"}),
+                            html.Span(" mm", style={"fontSize":"11px","color":"#64748b"}),
                         ]),
                         html.Div(id="fused-rain-breakdown", style={"fontSize":"9px","marginTop":"4px"}),
                     ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
@@ -795,7 +795,7 @@ app.layout = html.Div([
                         html.Div("🌿 ET₀", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
                         html.Div([
                             html.Span(id="val-et0", style={"fontSize":"22px","fontWeight":"800","color":"#10b981"}),
-                            html.Span(" mm/d", style={"fontSize":"11px","color":"#64748b"}),
+                            html.Span(" mm/hari", style={"fontSize":"11px","color":"#64748b"}),
                         ]),
                     ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
                               "borderRadius":"10px","border":"1px solid #10b98133"}),
@@ -816,11 +816,11 @@ app.layout = html.Div([
                     html.Div([
                         html.Span("🌱 Suhu Tanah: ", style={"fontSize":"10px","color":"#64748b"}),
                         html.Span(id="val-soil-temp-0", style={"fontSize":"11px","fontWeight":"700","color":"#f97316"}),
-                        html.Span(" K (0cm) | ", style={"fontSize":"10px","color":"#334155"}),
+                        html.Span(" °C (0cm) | ", style={"fontSize":"10px","color":"#334155"}),
                         html.Span(id="val-soil-temp-6", style={"fontSize":"11px","fontWeight":"700","color":"#f59e0b"}),
-                        html.Span(" K (6cm) | ", style={"fontSize":"10px","color":"#334155"}),
+                        html.Span(" °C (6cm) | ", style={"fontSize":"10px","color":"#334155"}),
                         html.Span(id="val-soil-temp-18", style={"fontSize":"11px","fontWeight":"700","color":"#eab308"}),
-                        html.Span(" K (18cm)", style={"fontSize":"10px","color":"#334155"}),
+                        html.Span(" °C (18cm)", style={"fontSize":"10px","color":"#334155"}),
                     ], style={"flex":"1"}),
                     html.Div([
                         html.Span("💦 Kelembaban Tanah: ", style={"fontSize":"10px","color":"#64748b"}),
@@ -841,7 +841,7 @@ app.layout = html.Div([
                         html.Span(id="val-wind-dir-label", style={"fontSize":"10px","color":"#64748b"}),
                         html.Span(" | 🌫 Titik Embun: ", style={"fontSize":"10px","color":"#64748b"}),
                         html.Span(id="val-dewpoint", style={"fontSize":"11px","fontWeight":"700","color":"#a78bfa"}),
-                        html.Span(" K", style={"fontSize":"10px","color":"#334155"}),
+                        html.Span(" °C", style={"fontSize":"10px","color":"#334155"}),
                         html.Span(" | ☁️ Awan: ", style={"fontSize":"10px","color":"#64748b"}),
                         html.Span(id="val-cloud", style={"fontSize":"11px","fontWeight":"700","color":"#94a3b8"}),
                         html.Span(" %", style={"fontSize":"10px","color":"#334155"}),
@@ -1333,11 +1333,11 @@ def update_fusion_panel(fused):
     cm_wind = {"BMKG": "#a78bfa", "OpenWeather": "#8b5cf6", "Open-Meteo": "#7c3aed"}
 
     return (
-        f"{temp + 273.15:.1f}", f"{hum:.0f}", f"{rain:.1f}", f"{wind:.1f}",
+        f"{temp:.1f}", f"{hum:.0f}", f"{rain:.1f}", f"{wind:.1f}",
         desc,
-        make_bd("temp",     "K",    cm_temp),
+        make_bd("temp",     "°C",   cm_temp),
         make_bd("humidity", "%",    cm_hum),
-        make_bd("rain",     "mm/h", cm_rain),
+        make_bd("rain",     "mm",   cm_rain),
         make_bd("wind",     "m/s",  cm_wind),
         badge,
     )
@@ -1409,12 +1409,12 @@ def update_openmeteo_cards(_, data):
 
     pressure = c.get("surface_pressure", 1013.0)
     return (
-        f"{st0+273.15:.1f}", f"{st6+273.15:.1f}", f"{st18+273.15:.1f}",
+        f"{st0:.1f}", f"{st6:.1f}", f"{st18:.1f}",
         f"{sm0:.3f}", sm_span(sm0_txt, sm0_clr),
         f"{sm1:.3f}", sm_span(sm1_txt, sm1_clr),
         f"{sm3:.3f}", sm_span(sm3_txt, sm3_clr),
         f"{uv:.1f}",  html.Span(uv_txt, style={"color": uv_clr, "fontWeight": "600"}),
-        f"{dew+273.15:.1f}", f"{cld}",
+        f"{dew:.1f}", f"{cld}",
         f"{et0:.2f}", f"{wdir:.0f}",
         html.Span(f"({wind_label})", style={"color": "#64748b"}),
         f"{pressure:.0f}",
@@ -1423,43 +1423,103 @@ def update_openmeteo_cards(_, data):
 # ─── CALLBACK: GRAFIK PRAKIRAAN 7 HARI ────────────────────────────────────────
 @app.callback(
     Output("chart-openmeteo-daily", "figure"),
-    Input("store-openmeteo", "data"),
+    [Input("store-openmeteo", "data"),
+     Input("store-weather",   "data"),
+     Input("store-bmkg",      "data")],
 )
-def update_openmeteo_daily(data):
-    if not data:
-        data = fetch_openmeteo()
-    daily = data.get("daily", {})
-    times = daily.get("time", [])
-    ch    = daily.get("precipitation_sum", [])
-    tmax  = daily.get("temperature_2m_max", [])
-    tmin  = daily.get("temperature_2m_min", [])
-    uv    = daily.get("uv_index_max", [])
-
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=times, y=ch, name="CH (mm)", marker_color="#38bdf8",
-                         opacity=0.8, yaxis="y"))
-    tmax_k = [t + 273.15 for t in tmax] if tmax else []
-    tmin_k = [t + 273.15 for t in tmin] if tmin else []
-    fig.add_trace(go.Scatter(x=times, y=tmax_k, name="Suhu Maks (K)",
-                             line=dict(color="#ef4444", width=2), yaxis="y2"))
-    fig.add_trace(go.Scatter(x=times, y=tmin_k, name="Suhu Min (K)",
-                             line=dict(color="#3b82f6", width=2, dash="dot"), yaxis="y2"))
-    fig.add_trace(go.Scatter(x=times, y=uv, name="UV Maks",
-                             line=dict(color="#eab308", width=1.5, dash="dash"), yaxis="y3"))
-    fig.update_layout(
+def update_forecast_fused(om_data, weather_data, bmkg_data):
+    """
+    Grafik prakiraan 7 hari — weighted average dari 3 sumber.
+    BMKG 50% · OpenWeatherMap 30% · Open-Meteo 20%
+    """
+    DARK = dict(
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#94a3b8", size=10),
-        margin=dict(l=40, r=60, t=10, b=40),
-        xaxis=dict(showgrid=False),
-        yaxis=dict(title="mm", showgrid=True, gridcolor="#1e293b"),
-        yaxis2=dict(overlaying="y", side="right", showgrid=False, title="°C"),
-        yaxis3=dict(overlaying="y", side="right", showgrid=False,
-                    position=0.95, title="UV"),
-        barmode="overlay",
-        legend=dict(orientation="h", y=-0.3),
+        margin=dict(l=40, r=20, t=20, b=40),
         hovermode="x unified",
+        legend=dict(orientation="h", y=-0.35, font=dict(size=9)),
+    )
+    if not om_data:
+        om_data = fetch_openmeteo()
+
+    daily = om_data.get("daily", {}) if om_data else {}
+    times = daily.get("time", [])
+    ch_om = daily.get("precipitation_sum", [0]*7)
+    tmax  = daily.get("temperature_2m_max", [30]*7)
+    tmin  = daily.get("temperature_2m_min", [23]*7)
+    uv    = daily.get("uv_index_max", [5]*7)
+
+    # Ambil prakiraan OpenWeatherMap jika ada
+    owm_ch = []
+    if weather_data:
+        try:
+            owm_fcst = weather_data.get("forecast", {})
+            if owm_fcst:
+                owm_ch = [owm_fcst.get(t, ch_om[i] if i < len(ch_om) else 0)
+                          for i, t in enumerate(times[:5])]
+        except Exception:
+            pass
+
+    # Ambil prakiraan BMKG jika ada
+    bmkg_ch = []
+    if bmkg_data:
+        try:
+            cuaca_list = bmkg_data.get("cuaca", [])
+            bmkg_ch = [float(p[0].get("hu", 0))/10 if p else 0
+                       for p in cuaca_list[:7]]
+        except Exception:
+            pass
+
+    # Weighted average CH per hari
+    ch_fused = []
+    for i, t in enumerate(times):
+        om_v  = ch_om[i]  if i < len(ch_om)  else 0
+        owm_v = owm_ch[i] if i < len(owm_ch) else om_v
+        bmk_v = bmkg_ch[i]if i < len(bmkg_ch)else om_v
+        # Weighted: BMKG 50%, OWM 30%, Open-Meteo 20%
+        fused = bmk_v*0.5 + owm_v*0.3 + om_v*0.2
+        ch_fused.append(round(fused, 1))
+
+    # Kalau BMKG/OWM tidak punya data → pakai Open-Meteo saja
+    if not any(ch_fused):
+        ch_fused = ch_om
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=times, y=ch_fused,
+        name="CH (mm) — Fused", marker_color="#38bdf8", opacity=0.8, yaxis="y",
+    ))
+    fig.add_trace(go.Scatter(
+        x=times, y=tmax,
+        name="Suhu Maks (°C)", line=dict(color="#ef4444", width=2),
+        mode="lines+markers", marker=dict(size=4), yaxis="y2",
+    ))
+    fig.add_trace(go.Scatter(
+        x=times, y=tmin,
+        name="Suhu Min (°C)",
+        line=dict(color="#3b82f6", width=1.5, dash="dot"),
+        mode="lines+markers", marker=dict(size=3), yaxis="y2",
+    ))
+    fig.add_trace(go.Scatter(
+        x=times, y=uv,
+        name="UV Maks", line=dict(color="#eab308", width=1.5, dash="dash"),
+        mode="lines+markers", marker=dict(size=3), yaxis="y3",
+    ))
+    fig.update_layout(
+        yaxis =dict(title="mm", showgrid=True, gridcolor="#1e293b", side="left"),
+        yaxis2=dict(title="°C", overlaying="y", side="right",
+                    showgrid=False, range=[15, 40]),
+        yaxis3=dict(title="UV", overlaying="y", side="right",
+                    showgrid=False, position=0.97, range=[0, 12]),
+        annotations=[dict(
+            text="© Fused: BMKG 50% · OWM 30% · Open-Meteo 20%",
+            xref="paper", yref="paper", x=0, y=-0.3,
+            showarrow=False, font=dict(size=8, color="#475569"),
+        )],
+        **DARK,
     )
     return fig
+
 
 # ─── CALLBACK: GRAFIK KELEMBABAN TANAH ────────────────────────────────────────
 # Buffer kelembaban tanah (simulasi tren 24 jam)
@@ -1911,7 +1971,7 @@ def update_micromet_chart(param, year_range):
                 line=dict(color="#eab308", width=2),
                 fill="tozeroy", fillcolor="rgba(234,179,8,0.1)"))
         fig.update_layout(title="Tren Radiasi Matahari Bulanan (MJ/m²/hari)",
-                          yaxis=dict(title="MJ/m²", showgrid=True, gridcolor="#1e293b"),
+                          yaxis=dict(title="W/m²", showgrid=True, gridcolor="#1e293b"),
                           xaxis=dict(showgrid=False), **DARK)
 
     elif param == "et0":
