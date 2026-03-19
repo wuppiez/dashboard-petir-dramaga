@@ -735,42 +735,34 @@ app.layout = html.Div([
                     # Suhu
                     html.Div([
                         html.Div("🌡 Suhu", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Div([
-                            html.Span(id="fused-temp", style={"fontSize":"22px","fontWeight":"800","color":"#ef4444"}),
-                            html.Span(" °C", style={"fontSize":"11px","color":"#64748b"}),
-                        ]),
-                        html.Div(id="fused-temp-breakdown", style={"fontSize":"9px","marginTop":"4px"}),
-                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                        html.Span(id="fused-temp", style={"fontSize":"24px","fontWeight":"800","color":"#ef4444"}),
+                        html.Span(" °C", style={"fontSize":"11px","color":"#64748b"}),
+                        html.Div(id="fused-temp-breakdown", style={"display":"none"}),
+                    ], style={"flex":"1","minWidth":"100px","padding":"12px","background":"#0f172a",
                               "borderRadius":"10px","border":"1px solid #ef444433"}),
                     # Kelembaban
                     html.Div([
                         html.Div("💧 Kelembaban", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Div([
-                            html.Span(id="fused-humidity", style={"fontSize":"22px","fontWeight":"800","color":"#3b82f6"}),
-                            html.Span(" %", style={"fontSize":"11px","color":"#64748b"}),
-                        ]),
-                        html.Div(id="fused-humidity-breakdown", style={"fontSize":"9px","marginTop":"4px"}),
-                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                        html.Span(id="fused-humidity", style={"fontSize":"24px","fontWeight":"800","color":"#3b82f6"}),
+                        html.Span(" %", style={"fontSize":"11px","color":"#64748b"}),
+                        html.Div(id="fused-humidity-breakdown", style={"display":"none"}),
+                    ], style={"flex":"1","minWidth":"100px","padding":"12px","background":"#0f172a",
                               "borderRadius":"10px","border":"1px solid #3b82f633"}),
                     # CH
                     html.Div([
                         html.Div("🌧 CH", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Div([
-                            html.Span(id="fused-rain", style={"fontSize":"22px","fontWeight":"800","color":"#06b6d4"}),
-                            html.Span(" mm", style={"fontSize":"11px","color":"#64748b"}),
-                        ]),
-                        html.Div(id="fused-rain-breakdown", style={"fontSize":"9px","marginTop":"4px"}),
-                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                        html.Span(id="fused-rain", style={"fontSize":"24px","fontWeight":"800","color":"#06b6d4"}),
+                        html.Span(" mm", style={"fontSize":"11px","color":"#64748b"}),
+                        html.Div(id="fused-rain-breakdown", style={"display":"none"}),
+                    ], style={"flex":"1","minWidth":"100px","padding":"12px","background":"#0f172a",
                               "borderRadius":"10px","border":"1px solid #06b6d433"}),
                     # Angin
                     html.Div([
                         html.Div("💨 Angin", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Div([
-                            html.Span(id="fused-wind", style={"fontSize":"22px","fontWeight":"800","color":"#8b5cf6"}),
-                            html.Span(" m/s", style={"fontSize":"11px","color":"#64748b"}),
-                        ]),
-                        html.Div(id="fused-wind-breakdown", style={"fontSize":"9px","marginTop":"4px"}),
-                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                        html.Span(id="fused-wind", style={"fontSize":"24px","fontWeight":"800","color":"#8b5cf6"}),
+                        html.Span(" m/s", style={"fontSize":"11px","color":"#64748b"}),
+                        html.Div(id="fused-wind-breakdown", style={"display":"none"}),
+                    ], style={"flex":"1","minWidth":"100px","padding":"12px","background":"#0f172a",
                               "borderRadius":"10px","border":"1px solid #8b5cf633"}),
                     # Tekanan
                     html.Div([
@@ -893,11 +885,7 @@ app.layout = html.Div([
                              style={"fontSize": "16px", "color": "#f1f5f9", "marginBottom": "8px"}),
                     html.Div(id="weather-feelslike",
                              style={"fontSize": "13px", "color": "#94a3b8"}),
-                    html.Hr(style={"borderColor": "#1e293b", "margin": "16px 0"}),
-                    html.H3("📡 Prakiraan 5 Hari", style={"color": "#38bdf8", "margin": "0 0 12px",
-                                                          "fontSize": "15px", "fontWeight": "600"}),
-                    dcc.Graph(id="chart-forecast", config={"displayModeBar": False},
-                              style={"height": "200px"}),
+
                 ], style={"height": "100%"}),
             ], style={
                 "background": "linear-gradient(135deg, #1e293b, #0f172a)",
@@ -1066,7 +1054,7 @@ app.layout = html.Div([
                             min=2005,
                             max=2026,
                             step=1,
-                            value=[2005, 2026],
+                            value=[2021, 2026],
                             marks={y: str(y) for y in range(2005, 2027, 5)},
                             tooltip={"always_visible": False},
                         ),
@@ -1260,6 +1248,12 @@ def update_fused_store(owm, meteo, bmkg):
     Input("year-range", "value"),
 )
 def update_hist_title(year_range):
+    df = get_hist_data(full=False)
+    data_range = ""
+    if df is not None and len(df) > 0:
+        yr_min = int(df["year"].min())
+        yr_max = int(df["year"].max())
+        data_range = f" [{yr_min}–{yr_max}]"
     return f"📊 Analisis Tren Historis ({year_range[0]}–{year_range[1]})"
 
 # ─── CALLBACK: TAMPILKAN FUSION PANEL ─────────────────────────────────────────
@@ -1285,16 +1279,142 @@ def breakdown_bar(label, value, color, unit=""):
     ], style={"marginBottom": "3px", "display": "flex", "alignItems": "center", "gap": "4px"})
 
 @app.callback(
-    [Output("fused-temp",              "children"),
-     Output("fused-humidity",          "children"),
-     Output("fused-rain",              "children"),
-     Output("fused-wind",              "children"),
-     Output("fused-bmkg-desc",         "children"),
-     Output("fused-temp-breakdown",    "children"),
+    Output("chart-historical", "figure"),
+    [Input("hist-view",   "value"),
+     Input("year-range",  "value")],
+)
+def update_historical(view, year_range):
+    # Coba full data dulu, fallback ke 5 tahun jika belum siap
+    df = get_hist_data(full=True)
+    if df is None or len(df) == 0:
+        df = get_hist_data(full=False)
+    if df is None or len(df) == 0:
+        fig = go.Figure()
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#94a3b8"),
+            annotations=[dict(text="⏳ Memuat data CHIRPS...",
+                xref="paper", yref="paper", x=0.5, y=0.5,
+                showarrow=False, font=dict(size=16, color="#38bdf8"))],
+        )
+        return fig
+    df = df.copy()
+    df["year"] = df["year"].astype(int)
+    df = df[(df["year"] >= year_range[0]) & (df["year"] <= year_range[1])]
+    if len(df) == 0:
+        # Tidak ada data di range ini, tampilkan semua
+        df_all = get_hist_data(full=True) or get_hist_data(full=False)
+        df = df_all.copy()
+
+    DARK = dict(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#94a3b8", size=10),
+        margin=dict(l=50, r=20, t=20, b=40),
+        hovermode="x unified",
+    )
+    fig = go.Figure()
+
+    if view == "monthly":
+        m = df.groupby("month")["rainfall"].mean().reindex(range(1,13), fill_value=0)
+        months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+        colorscale = [f"rgba(56,189,248,{0.4 + 0.05*i})" for i in range(12)]
+        fig.add_trace(go.Bar(x=months, y=m.values.round(1),
+            marker_color=colorscale, name="Rata-rata CH (mm/hari)",
+            text=[f"{v:.1f}" for v in m.values], textposition="outside",
+            textfont=dict(size=9)))
+        fig.update_layout(title="Rata-rata Curah Hujan Bulanan",
+                          yaxis=dict(title="mm/hari", showgrid=True, gridcolor="#1e293b"),
+                          xaxis=dict(showgrid=False), **DARK)
+
+    elif view == "annual":
+        a = df.groupby("year")["rainfall"].sum()
+        fig.add_trace(go.Bar(x=a.index, y=a.values.round(0),
+            marker_color="#38bdf8", opacity=0.85, name="Total CH (mm/tahun)"))
+        fig.update_layout(title="Total Curah Hujan Tahunan",
+                          yaxis=dict(title="mm/tahun", showgrid=True, gridcolor="#1e293b"),
+                          xaxis=dict(showgrid=False), **DARK)
+
+    elif view == "scatter":
+        fig.add_trace(go.Scatter(x=df["date"], y=df["rainfall"],
+            mode="markers", marker=dict(
+                color=df["rainfall"], colorscale="Blues", size=3, opacity=0.7,
+                colorbar=dict(title="mm", thickness=12)),
+            name="CH Harian (mm)"))
+        fig.update_layout(title="Distribusi Harian Curah Hujan",
+                          yaxis=dict(title="CH (mm)", showgrid=True, gridcolor="#1e293b"),
+                          xaxis=dict(title="Tanggal", showgrid=False), **DARK)
+
+    elif view == "heatmap":
+        pivot = df.pivot_table(index="month", columns="year", values="rainfall", aggfunc="mean")
+        fig.add_trace(go.Heatmap(
+            z=pivot.values, x=pivot.columns, y=pivot.index,
+            colorscale="Blues", colorbar=dict(title="mm/hari", thickness=12),
+            hoverongaps=False))
+        months_lbl = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+        fig.update_layout(title="Heatmap CH — Bulan × Tahun",
+                          yaxis=dict(ticktext=months_lbl, tickvals=list(range(1,13))),
+                          **DARK)
+
+    elif view == "extreme":
+        ex = df[df["rainfall"] >= 50].groupby("year").size()
+        all_years = range(year_range[0], year_range[1]+1)
+        ex = ex.reindex(all_years, fill_value=0)
+        fig.add_trace(go.Bar(x=ex.index, y=ex.values,
+            marker_color="#ef4444", opacity=0.85,
+            name="Hari Ekstrem (≥50mm)"))
+        fig.update_layout(title="Frekuensi Hari Hujan Ekstrem (≥50 mm/hari)",
+                          yaxis=dict(title="Jumlah Hari", showgrid=True, gridcolor="#1e293b"),
+                          xaxis=dict(showgrid=False), **DARK)
+
+    return fig
+
+@app.callback(
+    Output("stat-cards", "children"),
+    Input("year-range", "value"),
+)
+def update_stat_cards(year_range):
+    df = get_hist_data(full=True)
+    if df is None or len(df) == 0:
+        return []
+    df = df[(df["year"] >= year_range[0]) & (df["year"] <= year_range[1])]
+
+    stats = [
+        ("📅", "Total Hari",       f"{len(df):,}",                    "#38bdf8"),
+        ("💧", "Rata-rata Harian", f"{df['rainfall'].mean():.2f} mm", "#10b981"),
+        ("🌧", "Hari Hujan",       f"{(df['rainfall'] > 0.5).sum():,}","#3b82f6"),
+        ("⛈️", "Hari Ekstrem >50mm", f"{(df['rainfall'] >= 50).sum():,}", "#ef4444"),
+        ("📈", "Maks Harian",      f"{df['rainfall'].max():.1f} mm",  "#f59e0b"),
+        ("🗓", "Total Periode",    f"{df['rainfall'].sum()/1000:.1f} m","#8b5cf6"),
+    ]
+    cards = []
+    for icon, label, value, color in stats:
+        cards.append(html.Div([
+            html.Div([html.Span(icon, style={"fontSize":"18px"}),
+                      html.Span(f" {label}", style={"fontSize":"10px","color":"#94a3b8",
+                                "textTransform":"uppercase","marginLeft":"4px"})],
+                     style={"marginBottom":"6px"}),
+            html.Div(value, style={"fontSize":"20px","fontWeight":"800",
+                                   "color":"#f1f5f9","letterSpacing":"-0.5px"}),
+        ], style={
+            "background":"linear-gradient(135deg,#1e293b,#0f172a)",
+            "border":f"1px solid {color}44","borderRadius":"10px",
+            "padding":"14px 18px","flex":"1","minWidth":"120px",
+            "boxShadow":f"0 2px 12px {color}22",
+        }))
+    return cards
+
+
+@app.callback(
+    [Output("fused-temp",           "children"),
+     Output("fused-humidity",       "children"),
+     Output("fused-rain",           "children"),
+     Output("fused-wind",           "children"),
+     Output("fused-bmkg-desc",      "children"),
+     Output("fused-temp-breakdown", "children"),
      Output("fused-humidity-breakdown","children"),
-     Output("fused-rain-breakdown",    "children"),
-     Output("fused-wind-breakdown",    "children"),
-     Output("fusion-sources-badge",    "children"),
+     Output("fused-rain-breakdown", "children"),
+     Output("fused-wind-breakdown", "children"),
+     Output("fusion-sources-badge", "children"),
     ],
     Input("store-fused", "data"),
 )
@@ -1423,97 +1543,80 @@ def update_openmeteo_cards(_, data):
 # ─── CALLBACK: GRAFIK PRAKIRAAN 7 HARI ────────────────────────────────────────
 @app.callback(
     Output("chart-openmeteo-daily", "figure"),
-    [Input("store-openmeteo", "data"),
-     Input("store-weather",   "data"),
-     Input("store-bmkg",      "data")],
+    Input("store-bmkg", "data"),
 )
-def update_forecast_fused(om_data, weather_data, bmkg_data):
-    """
-    Grafik prakiraan 7 hari — weighted average dari 3 sumber.
-    BMKG 50% · OpenWeatherMap 30% · Open-Meteo 20%
-    """
+def update_forecast_bmkg(bmkg_data):
+    """Prakiraan 7 hari dari BMKG saja (sumber resmi, kode 32.01.30.2005)."""
     DARK = dict(
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#94a3b8", size=10),
-        margin=dict(l=40, r=20, t=20, b=40),
+        margin=dict(l=40, r=20, t=20, b=50),
         hovermode="x unified",
-        legend=dict(orientation="h", y=-0.35, font=dict(size=9)),
+        legend=dict(orientation="h", y=-0.4, font=dict(size=9)),
     )
-    if not om_data:
-        om_data = fetch_openmeteo()
-
-    daily = om_data.get("daily", {}) if om_data else {}
-    times = daily.get("time", [])
-    ch_om = daily.get("precipitation_sum", [0]*7)
-    tmax  = daily.get("temperature_2m_max", [30]*7)
-    tmin  = daily.get("temperature_2m_min", [23]*7)
-    uv    = daily.get("uv_index_max", [5]*7)
-
-    # Ambil prakiraan OpenWeatherMap jika ada
-    owm_ch = []
-    if weather_data:
-        try:
-            owm_fcst = weather_data.get("forecast", {})
-            if owm_fcst:
-                owm_ch = [owm_fcst.get(t, ch_om[i] if i < len(ch_om) else 0)
-                          for i, t in enumerate(times[:5])]
-        except Exception:
-            pass
-
-    # Ambil prakiraan BMKG jika ada
-    bmkg_ch = []
-    if bmkg_data:
-        try:
-            cuaca_list = bmkg_data.get("cuaca", [])
-            bmkg_ch = [float(p[0].get("hu", 0))/10 if p else 0
-                       for p in cuaca_list[:7]]
-        except Exception:
-            pass
-
-    # Weighted average CH per hari
-    ch_fused = []
-    for i, t in enumerate(times):
-        om_v  = ch_om[i]  if i < len(ch_om)  else 0
-        owm_v = owm_ch[i] if i < len(owm_ch) else om_v
-        bmk_v = bmkg_ch[i]if i < len(bmkg_ch)else om_v
-        # Weighted: BMKG 50%, OWM 30%, Open-Meteo 20%
-        fused = bmk_v*0.5 + owm_v*0.3 + om_v*0.2
-        ch_fused.append(round(fused, 1))
-
-    # Kalau BMKG/OWM tidak punya data → pakai Open-Meteo saja
-    if not any(ch_fused):
-        ch_fused = ch_om
-
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=times, y=ch_fused,
-        name="CH (mm) — Fused", marker_color="#38bdf8", opacity=0.8, yaxis="y",
-    ))
-    fig.add_trace(go.Scatter(
-        x=times, y=tmax,
-        name="Suhu Maks (°C)", line=dict(color="#ef4444", width=2),
-        mode="lines+markers", marker=dict(size=4), yaxis="y2",
-    ))
-    fig.add_trace(go.Scatter(
-        x=times, y=tmin,
-        name="Suhu Min (°C)",
-        line=dict(color="#3b82f6", width=1.5, dash="dot"),
-        mode="lines+markers", marker=dict(size=3), yaxis="y2",
-    ))
-    fig.add_trace(go.Scatter(
-        x=times, y=uv,
-        name="UV Maks", line=dict(color="#eab308", width=1.5, dash="dash"),
-        mode="lines+markers", marker=dict(size=3), yaxis="y3",
-    ))
+    times, ch, tmax, tmin = [], [], [], []
+
+    try:
+        if bmkg_data:
+            cuaca_list = bmkg_data.get("cuaca", [])
+            # Ambil 1 data per periode (tengah hari)
+            seen_dates = set()
+            for periode in cuaca_list:
+                for item in (periode if isinstance(periode, list) else []):
+                    try:
+                        dt_str = item.get("local_datetime","")[:10]
+                        if dt_str and dt_str not in seen_dates:
+                            seen_dates.add(dt_str)
+                            times.append(dt_str)
+                            tmax.append(float(item.get("t", 28) or 28))
+                            tmin.append(float(item.get("t", 24) or 24) - 4)
+                            # CH dari cuaca code
+                            wc = str(item.get("weather_code","0"))
+                            ch_val = 5.0 if wc in ["61","63","80","81"] else                                      2.0 if wc in ["51","53"] else 0.0
+                            ch.append(ch_val)
+                        if len(times) >= 7:
+                            break
+                    except Exception:
+                        continue
+                if len(times) >= 7:
+                    break
+    except Exception:
+        pass
+
+    # Fallback jika BMKG tidak punya data
+    if not times:
+        om = fetch_openmeteo()
+        daily = om.get("daily", {}) if om else {}
+        times = daily.get("time", [])[:7]
+        ch    = daily.get("precipitation_sum", [0]*7)[:7]
+        tmax  = daily.get("temperature_2m_max", [30]*7)[:7]
+        tmin  = daily.get("temperature_2m_min", [23]*7)[:7]
+
+    if times:
+        fig.add_trace(go.Bar(
+            x=times, y=ch,
+            name="CH (mm)", marker_color="#38bdf8", opacity=0.85, yaxis="y",
+        ))
+        fig.add_trace(go.Scatter(
+            x=times, y=tmax,
+            name="Suhu Maks (°C)", line=dict(color="#ef4444", width=2),
+            mode="lines+markers", marker=dict(size=5), yaxis="y2",
+        ))
+        fig.add_trace(go.Scatter(
+            x=times, y=tmin,
+            name="Suhu Min (°C)",
+            line=dict(color="#3b82f6", width=1.5, dash="dot"),
+            mode="lines+markers", marker=dict(size=4), yaxis="y2",
+        ))
+
     fig.update_layout(
-        yaxis =dict(title="mm", showgrid=True, gridcolor="#1e293b", side="left"),
-        yaxis2=dict(title="°C", overlaying="y", side="right",
+        yaxis =dict(title="CH (mm)", showgrid=True, gridcolor="#1e293b"),
+        yaxis2=dict(title="Suhu (°C)", overlaying="y", side="right",
                     showgrid=False, range=[15, 40]),
-        yaxis3=dict(title="UV", overlaying="y", side="right",
-                    showgrid=False, position=0.97, range=[0, 12]),
         annotations=[dict(
-            text="© Fused: BMKG 50% · OWM 30% · Open-Meteo 20%",
-            xref="paper", yref="paper", x=0, y=-0.3,
+            text="© Sumber: BMKG – api.bmkg.go.id | Kode: 32.01.30.2005",
+            xref="paper", yref="paper", x=0, y=-0.38,
             showarrow=False, font=dict(size=8, color="#475569"),
         )],
         **DARK,
@@ -2300,51 +2403,79 @@ def _tg_get_weather():
     return None
 
 def _handle_tg_command(chat_id, text):
+    """Handle Telegram commands — data sama dengan yang tampil di dashboard."""
     text = text.strip().lower().split("@")[0]
     if text in ("/start", "/help"):
         _tg_send(chat_id,
             "🌧️ <b>Bot Hidrometeorologi – Desa Petir</b>\n\n"
-            "/status  – Status cuaca &amp; level peringatan\n"
-            "/cuaca   – Info cuaca lengkap\n"
+            "/status  – Status cuaca sekarang\n"
+            "/cuaca   – Parameter cuaca lengkap\n"
             "/hujan   – Curah hujan hari ini\n"
             "/ekstrem – 5 event hujan terbesar\n"
-            "/tren    – Tren tahunan ringkasan\n"
+            "/tren    – Tren 5 tahun terakhir\n"
             "/help    – Tampilkan menu ini"
         )
     elif text == "/status":
-        w = _tg_get_weather()
-        if not w:
-            _tg_send(chat_id, "❌ Gagal mengambil data cuaca.")
-            return
-        temp  = w["main"]["temp"]
-        hum   = w["main"]["humidity"]
-        desc  = w["weather"][0]["description"].capitalize()
-        rain  = w.get("rain", {}).get("1h", 0)
-        now   = now_wib().strftime("%d %b %Y %H:%M WIB")
-        level, emoji = "NORMAL", "🟢"
-        if rain >= 150:   level, emoji = "AWAS",    "🔴"
-        elif rain >= 100: level, emoji = "SIAGA",   "🟠"
-        elif rain >= 50:  level, emoji = "WASPADA", "🟡"
-        _tg_send(chat_id,
-            f"{emoji} <b>Status: {level}</b>\n📍 {LOCATION_NAME}\n🕐 {now}\n"
-            f"🌡️ {temp:.1f}°C | 💧 {hum}%\n🌤️ {desc}\n🌧️ CH: <b>{rain:.1f} mm/jam</b>"
-        )
+        # Gunakan fused data — sama dengan dashboard
+        try:
+            owm   = fetch_weather()
+            meteo = fetch_openmeteo()
+            bmkg  = fetch_bmkg()
+            fused = fuse_data(owm, meteo, bmkg)
+            temp  = fused.get("temp", 27.0)
+            hum   = fused.get("humidity", 80.0)
+            rain  = fused.get("rain", 0.0)
+            wind  = fused.get("wind", 2.0)
+            desc  = fused.get("bmkg_desc", "Berawan")
+            now   = now_wib().strftime("%d %b %Y %H:%M WIB")
+            # Level peringatan berdasarkan CH harian CHIRPS terbaru
+            ch_thr = THRESHOLD_RT
+            level, emoji = "NORMAL", "🟢"
+            if rain >= ch_thr["AWAS"]:    level, emoji = "AWAS",    "🔴"
+            elif rain >= ch_thr["SIAGA"]: level, emoji = "SIAGA",   "🟠"
+            elif rain >= ch_thr["WASPADA"]: level, emoji = "WASPADA", "🟡"
+            _tg_send(chat_id,
+                f"{emoji} <b>Status: {level}</b>\n"
+                f"📍 {LOCATION_NAME}\n"
+                f"🕐 {now}\n━━━━━━━━━━━━━━━━\n"
+                f"🌡️ Suhu     : <b>{temp:.1f}°C</b>\n"
+                f"💧 Kelembaban: <b>{hum:.0f}%</b>\n"
+                f"🌧️ CH       : <b>{rain:.1f} mm</b>\n"
+                f"💨 Angin    : <b>{wind:.1f} m/s</b>\n"
+                f"🌤️ BMKG     : {desc}\n"
+                f"━━━━━━━━━━━━━━━━\n"
+                f"<i>Fused: BMKG 50% · OWM 30% · Open-Meteo 20%</i>"
+            )
+        except Exception as e:
+            _tg_send(chat_id, f"❌ Gagal mengambil data: {e}")
     elif text == "/cuaca":
-        w = _tg_get_weather()
-        if not w:
-            _tg_send(chat_id, "❌ Gagal mengambil data cuaca.")
-            return
-        _tg_send(chat_id,
-            f"🌤 <b>Cuaca Lengkap – Desa Petir</b>\n━━━━━━━━━━━━━━━━\n"
-            f"🌡️ Suhu        : {w['main']['temp']:.1f}°C\n"
-            f"🤔 Terasa      : {w['main']['feels_like']:.1f}°C\n"
-            f"💧 Kelembapan  : {w['main']['humidity']}%\n"
-            f"🌬️ Angin       : {w['wind']['speed']:.1f} m/s\n"
-            f"🔵 Tekanan     : {w['main']['pressure']} hPa\n"
-            f"👁️ Visibilitas : {w.get('visibility',10000)/1000:.1f} km\n"
-            f"🌧️ CH 1 jam    : {w.get('rain',{}).get('1h',0):.1f} mm\n"
-            f"🌤️ Kondisi     : {w['weather'][0]['description'].capitalize()}"
-        )
+        try:
+            owm   = fetch_weather()
+            meteo = fetch_openmeteo()
+            bmkg  = fetch_bmkg()
+            fused = fuse_data(owm, meteo, bmkg)
+            curr  = meteo.get("current", {}) if meteo else {}
+            et0   = (meteo.get("daily",{}).get("et0_fao_evapotranspiration",[4.0]) or [4.0])[0]
+            uv    = curr.get("uv_index", 0)
+            dew   = curr.get("dew_point_2m", 22.0)
+            cld   = curr.get("cloud_cover", 50)
+            pres  = curr.get("surface_pressure", 1013)
+            _tg_send(chat_id,
+                f"🌤 <b>Cuaca Terpadu – Desa Petir</b>\n"
+                f"━━━━━━━━━━━━━━━━\n"
+                f"🌡️ Suhu        : <b>{fused.get('temp',27):.1f}°C</b>\n"
+                f"💧 Kelembaban   : <b>{fused.get('humidity',80):.0f}%</b>\n"
+                f"🌧️ CH          : <b>{fused.get('rain',0):.1f} mm</b>\n"
+                f"💨 Angin       : <b>{fused.get('wind',2):.1f} m/s</b>\n"
+                f"🔵 Tekanan     : <b>{pres:.0f} hPa</b>\n"
+                f"☀️ UV Index    : <b>{uv:.1f}</b>\n"
+                f"🌿 ET₀        : <b>{et0:.2f} mm/hari</b>\n"
+                f"💦 Titik Embun : <b>{dew:.1f}°C</b>\n"
+                f"☁️ Awan        : <b>{cld}%</b>\n"
+                f"📡 BMKG        : {fused.get('bmkg_desc','Berawan')}"
+            )
+        except Exception as e:
+            _tg_send(chat_id, f"❌ Gagal mengambil data: {e}")
     elif text == "/hujan":
         today = now_wib().date()
         today_data = df_hist[df_hist["date"].dt.date == today]
