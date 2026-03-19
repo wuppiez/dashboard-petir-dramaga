@@ -66,125 +66,8 @@ LOCATION_NAME   = "Desa Petir, Dramaga, Bogor"
 DATA_FILE       = "data/rainfall_historical.csv"
 
 # Ambang batas peringatan (mm)
-# ─── THRESHOLD TERPADU DESA PETIR ────────────────────────────────────────────
-# Sumber: Analisis CHIRPS site-specific 8 kejadian bencana 2020–2024
-# Referensi: BMKG, PVMBG, Van Westen (2006), Puslittanak (2004)
-
-# Threshold CH harian (mm/hari) — grafik realtime & alert
-THRESHOLD_RT = {
-    "WASPADA": 27,   # P25 kejadian bencana Desa Petir
-    "SIAGA":   29,   # P50 kejadian bencana Desa Petir
-    "AWAS":    42,   # P75 kejadian bencana Desa Petir
-}
-
-# ─── ALGORITMA INDEKS RISIKO LONGSOR ─────────────────────────────────────────
-# Referensi: Van Westen (2006), PVMBG (2018), Crozier (1999)
-# Disesuaikan dengan data lokal 8 kejadian bencana Desa Petir 2020–2024
-# Threshold: Percentile P25/P50/P75 dari analisis CHIRPS site-specific
-
-# ─── THRESHOLD MULTI-VARIATE DESA PETIR ──────────────────────────────────────
-# Sumber CHIRPS : Analisis P25/P50/P75 — 8 kejadian bencana 2020–2024
-# Sumber NASA   : Estimasi literatur Van Westen (2006), Crozier (1999)
-#                 Akan diperhalus setelah data NASA POWER terkumpul ≥6 bulan
-THRESHOLD = {
-    # CH Harian (mm/hari) — CHIRPS site-specific
-    "ch_h":  {"waspada": 27,  "siaga": 29,  "awas": 42},
-    # Kumulatif 3 Hari (mm) — CHIRPS site-specific
-    "cum3":  {"waspada": 40,  "siaga": 75,  "awas": 110},
-    # Kumulatif 7 Hari (mm) — CHIRPS + PVMBG
-    "cum7":  {"waspada": 131, "siaga": 173, "awas": 205},
-    # Kelembaban Udara (%) — Crozier (1999)
-    "rh":    {"waspada": 75,  "siaga": 85,  "awas": 90},
-    # Evapotranspirasi (mm/hari) — Van Westen, kebalikan (rendah=bahaya)
-    "et0":   {"waspada": 3.5, "siaga": 2.5, "awas": 1.5},
-    # Kecepatan Angin (m/s) — data lokal angin kencang Petir
-    "ws":    {"waspada": 3,   "siaga": 6,   "awas": 9},
-}
-
-# Referensi threshold multi-variate untuk notifikasi
-THRESHOLD_MULTIVAR = {
-    # Level WASPADA: salah satu terpenuhi
-    "waspada": lambda ch, c3, c7, rh, et0, ws:
-        ch >= THRESHOLD["ch_h"]["waspada"] or
-        c3 >= THRESHOLD["cum3"]["waspada"] or
-        c7 >= THRESHOLD["cum7"]["waspada"] or
-        rh >= THRESHOLD["rh"]["waspada"],
-    # Level SIAGA: CH+RH atau kumulatif tinggi
-    "siaga": lambda ch, c3, c7, rh, et0, ws:
-        (ch >= THRESHOLD["ch_h"]["siaga"] and rh >= THRESHOLD["rh"]["waspada"]) or
-        c3 >= THRESHOLD["cum3"]["siaga"] or
-        c7 >= THRESHOLD["cum7"]["siaga"],
-    # Level AWAS: kombinasi CH + kondisi tanah jenuh
-    "awas": lambda ch, c3, c7, rh, et0, ws:
-        (ch >= THRESHOLD["ch_h"]["awas"]) or
-        (c3 >= THRESHOLD["cum3"]["awas"]) or
-        (ch >= THRESHOLD["ch_h"]["siaga"] and rh >= THRESHOLD["rh"]["siaga"] and et0 <= THRESHOLD["et0"]["siaga"]),
-}
-
-# Bobot parameter indeks risiko (total = 100)
-RISIKO_WEIGHTS = {
-    "ch_h": 30,   # CH harian       — korelasi 0.459 data lokal
-    "cum3": 25,   # Kumulatif 3 hr  — API antecedent, PVMBG
-    "cum7": 20,   # Kumulatif 7 hr  — Soil saturation, Van Westen
-    "rh":   15,   # Kelembaban udara — Crozier (1999)
-    "et0":   5,   # Evapotranspirasi — defisit air tanah
-    "ws":    5,   # Kec. angin       — angin kencang lokal Petir
-}
-
-def hitung_indeks_risiko(ch_h, cum3, cum7, rh=80, et0=3.0, ws=2.0):
-    """
-    Hitung indeks risiko longsor 0–100.
-
-    Parameter:
-        ch_h  : CH harian (mm)
-        cum3  : Kumulatif 3 hari (mm)
-        cum7  : Kumulatif 7 hari (mm)
-        rh    : Kelembaban udara (%) — default 80%
-        et0   : Evapotranspirasi (mm/hari) — default 3.0
-        ws    : Kecepatan angin (m/s) — default 2.0
-
-    Returns:
-        dict: indeks, level, warna, skor_per_parameter
-    """
-    # Normalisasi tiap parameter ke 0–1 lalu kali bobot
-    s_ch  = min(ch_h  / THRESHOLD["ch_h"]["awas"], 1.0) * RISIKO_WEIGHTS["ch_h"]
-    s_c3  = min(cum3  / THRESHOLD["cum3"]["awas"], 1.0) * RISIKO_WEIGHTS["cum3"]
-    s_c7  = min(cum7  / THRESHOLD["cum7"]["awas"], 1.0) * RISIKO_WEIGHTS["cum7"]
-    s_rh  = max(rh - 70, 0) / 30 * RISIKO_WEIGHTS["rh"]   # >70% mulai berisiko
-    s_et0 = max(THRESHOLD["et0"]["waspada"] - et0, 0) / THRESHOLD["et0"]["waspada"] * RISIKO_WEIGHTS["et0"]
-    s_ws  = min(ws / 10, 1.0)    * RISIKO_WEIGHTS["ws"]
-
-    indeks = round(s_ch + s_c3 + s_c7 + s_rh + s_et0 + s_ws, 1)
-    indeks = max(0, min(100, indeks))  # Clamp 0–100
-
-    if indeks >= 75:
-        level, warna, emoji = "AWAS",    "#ef4444", "🔴"
-    elif indeks >= 50:
-        level, warna, emoji = "SIAGA",   "#f97316", "🟠"
-    elif indeks >= 25:
-        level, warna, emoji = "WASPADA", "#eab308", "🟡"
-    else:
-        level, warna, emoji = "NORMAL",  "#22c55e", "🟢"
-
-    return {
-        "indeks": indeks,
-        "level":  level,
-        "warna":  warna,
-        "emoji":  emoji,
-        "skor": {
-            "ch_h": round(s_ch, 1),
-            "cum3": round(s_c3, 1),
-            "cum7": round(s_c7, 1),
-            "rh":   round(s_rh, 1),
-            "et0":  round(s_et0,1),
-            "ws":   round(s_ws, 1),
-        },
-        "input": {
-            "ch_h": ch_h, "cum3": cum3, "cum7": cum7,
-            "rh": rh, "et0": et0, "ws": ws,
-        },
-        "threshold": THRESHOLD,
-    }
+# Threshold sementara untuk notifikasi Telegram (akan diupdate)
+THRESHOLD_RT = {"WASPADA": 27, "SIAGA": 29, "AWAS": 42}
 
 # ─── SUPABASE REALTIME CONFIG ────────────────────────────────────────────────
 SUPABASE_REALTIME_ENABLED = False  # Diaktifkan via env var
@@ -227,29 +110,75 @@ SLOPE_GEOJSON = load_slope_geojson()  # File lokal 1.6MB — OK di startup
 from db import load_historical
 
 import threading as _threading
-_df_hist_cache = None  # Cache global
-_df_hist_lock  = _threading.Lock()
+from datetime import date as _date
 
-def get_hist_data():
-    """Lazy load data CHIRPS — fetch dari Supabase sekali, cache selamanya."""
+_df_hist_cache     = None  # Cache semua data (lazy)
+_df_hist_5yr_cache = None  # Cache 5 tahun terakhir (diload saat startup)
+_df_hist_lock      = _threading.Lock()
+
+def _load_5yr():
+    """Load 5 tahun terakhir dari Supabase saat startup."""
+    try:
+        import requests as _req
+        _sb_url = os.getenv("SUPABASE_URL","")
+        _sb_key = os.getenv("SUPABASE_ANON_KEY","")
+        if not _sb_url or not _sb_key:
+            raise ValueError("No credentials")
+        from_date = (_date.today().replace(year=_date.today().year - 5)).isoformat()
+        all_rows, offset = [], 0
+        while True:
+            url = (f"{_sb_url}/rest/v1/rainfall_daily"
+                   f"?select=date,rainfall_mm&order=date.asc"
+                   f"&date=gte.{from_date}&limit=1000&offset={offset}")
+            r = _req.get(url, headers={
+                "apikey": _sb_key, "Authorization": f"Bearer {_sb_key}"}, timeout=15)
+            rows = r.json() if r.status_code == 200 else []
+            if not rows: break
+            all_rows += rows
+            if len(rows) < 1000: break
+            offset += 1000
+        if all_rows:
+            df = pd.DataFrame(all_rows)
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.rename(columns={"rainfall_mm": "rainfall"})
+            df["year"]  = df["date"].dt.year
+            df["month"] = df["date"].dt.month
+            df["month_str"] = df["date"].dt.strftime("%b")
+            df["doy"]   = df["date"].dt.dayofyear
+            print(f"✅ CHIRPS 5yr loaded: {len(df):,} baris ({from_date} s/d sekarang)")
+            return df.sort_values("date").reset_index(drop=True)
+    except Exception as e:
+        print(f"⚠️  CHIRPS 5yr load error: {e}")
+    return None
+
+# Load 5 tahun saat startup (lebih kecil, tidak timeout)
+_df_hist_5yr_cache = _load_5yr()
+
+def get_hist_data(full=False):
+    """
+    full=False → pakai cache 5 tahun (sudah diload saat startup)
+    full=True  → lazy load semua data historis
+    """
     global _df_hist_cache
+    if not full:
+        return _df_hist_5yr_cache
+    # Full historical — lazy
     if _df_hist_cache is not None:
         return _df_hist_cache
     with _df_hist_lock:
-        if _df_hist_cache is not None:  # Double-check setelah lock
+        if _df_hist_cache is not None:
             return _df_hist_cache
         try:
-            print("🔄 Loading CHIRPS data (lazy)...")
+            print("🔄 Loading CHIRPS full data (lazy)...")
             _df_hist_cache = load_historical()
-            print(f"✅ CHIRPS loaded: {len(_df_hist_cache):,} baris")
+            print(f"✅ CHIRPS full loaded: {len(_df_hist_cache):,} baris")
             return _df_hist_cache
         except Exception as e:
-            print(f"⚠️  CHIRPS load error: {e}")
-            return None
+            print(f"⚠️  CHIRPS full load error: {e}")
+            return _df_hist_5yr_cache  # Fallback ke 5 tahun
 
-# df_hist tetap ada sebagai alias untuk backward compatibility
-# tapi diisi secara lazy
-df_hist = None  # Diisi saat pertama kali callback dipanggil
+# df_hist alias — gunakan 5 tahun cache untuk default
+df_hist = _df_hist_5yr_cache
 
 # ─── LOAD DATA MIKROMETEOROLOGI NASA POWER (LAZY) ────────────────────────────
 # Tidak diload saat startup — diload saat pertama kali callback dipanggil
@@ -711,16 +640,13 @@ app.layout = html.Div([
     dcc.Store(id="store-cap"),
     dcc.Store(id="store-health"),
     dcc.Store(id="store-micromet"),
-    dcc.Store(id="store-risiko"),
-    dcc.Store(id="store-realtime-trigger", data=0),
-    dcc.Interval(id="interval-realtime", interval=30_000, n_intervals=0),  # 30 detik
-    dcc.Interval(id="interval-risiko", interval=1_800_000, n_intervals=0),  # 30 menit
     dcc.Interval(id="interval-micromet", interval=3_600_000, n_intervals=0),  # 1 jam
+    dcc.Interval(id="interval-realtime", interval=30_000, n_intervals=0),  # 30 detik
     # map layers pakai file lokal (tidak perlu store/interval)
     dcc.Interval(id="interval-health", interval=300_000, n_intervals=0),  # 5 menit
     dcc.Interval(id="interval-cap", interval=1_800_000, n_intervals=0),  # 30 menit
     dcc.Store(id="store-fused"),
-    dcc.Store(id="store-alert-log", data=[]),
+
     dcc.Interval(id="interval-bmkg", interval=1_800_000, n_intervals=0),  # 30 menit
     dcc.Interval(id="interval-openmeteo", interval=600_000, n_intervals=0),  # 10 menit
 
@@ -788,248 +714,174 @@ app.layout = html.Div([
             "marginBottom": "12px", "flexWrap": "wrap", "gap": "8px",
         }),
 
-        # ── ROW 1: METRIC CARDS ─────────────────────────────────────────────
-        html.Div([
-            metric_card("fa-thermometer-half", "Suhu",         "val-temp",     "°C",     "#ef4444"),
-            metric_card("fa-tint",             "Kelembapan",   "val-humidity", "%",      "#3b82f6"),
-            metric_card("fa-cloud-rain",       "CH Sekarang",  "val-rain1h",   "mm/jam", "#06b6d4"),
-            metric_card("fa-wind",             "Kecepatan Angin","val-wind",   "m/s",    "#8b5cf6"),
-            metric_card("fa-compress-arrows-alt","Tekanan",    "val-pressure", "hPa",    "#f59e0b"),
-            metric_card("fa-eye",              "Visibilitas",  "val-vis",      "km",     "#10b981"),
-        ], style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "marginBottom": "16px"}),
+        # ROW 1 metric individual dihapus — digabung ke panel cuaca terpadu di bawah
 
-        # ── ROW FUSION: DATA FUSION PANEL ──────────────────────────────────────────
+        # ── PANEL CUACA TERPADU (Data Fusion + Open-Meteo compact) ────────────
         html.Div([
             html.Div([
-                # Header fusion
+                # Header
                 html.Div([
-                    html.Div([
-                        html.Span("🔀 Data Fusion Engine",
-                                  style={"fontSize": "14px", "fontWeight": "700", "color": "#38bdf8"}),
-                        html.Span(" — Weighted Average (BMKG 50% · OpenWeather 30% · Open-Meteo 20%)",
-                                  style={"fontSize": "11px", "color": "#64748b"}),
-                    ]),
-                    html.Div(id="fusion-sources-badge"),
-                ], style={"display": "flex", "justifyContent": "space-between",
-                          "alignItems": "center", "marginBottom": "14px", "flexWrap": "wrap", "gap": "8px"}),
-                # Fusion metric cards
+                    html.Span("🔀 Cuaca Terpadu",
+                              style={"fontSize":"13px","fontWeight":"700","color":"#38bdf8"}),
+                    html.Span(" — Weighted Average (BMKG 50% · OWM 30% · Open-Meteo 20%)",
+                              style={"fontSize":"10px","color":"#475569"}),
+                    html.Div(id="fusion-sources-badge",
+                             style={"marginLeft":"auto"}),
+                ], style={"display":"flex","alignItems":"center","gap":"8px",
+                          "marginBottom":"14px","flexWrap":"wrap"}),
+
+                # Cards row — 1 baris 8 parameter
                 html.Div([
                     # Suhu
                     html.Div([
-                        html.Div("🌡️ Suhu Udara", style={"fontSize": "11px", "color": "#94a3b8",
-                            "textTransform": "uppercase", "marginBottom": "4px"}),
+                        html.Div("🌡 Suhu", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
                         html.Div([
-                            html.Span(id="fused-temp",
-                                      style={"fontSize": "28px", "fontWeight": "800", "color": "#f1f5f9"}),
-                            html.Span("°C", style={"fontSize": "14px", "color": "#64748b", "marginLeft": "4px"}),
+                            html.Span(id="fused-temp", style={"fontSize":"22px","fontWeight":"800","color":"#ef4444"}),
+                            html.Span(" K", style={"fontSize":"11px","color":"#64748b"}),
                         ]),
-                        html.Div(id="fused-temp-breakdown",
-                                 style={"marginTop": "8px", "fontSize": "10px"}),
-                    ], style={"flex": "1", "minWidth": "140px", "padding": "12px",
-                              "background": "#0f172a", "borderRadius": "10px",
-                              "border": "1px solid #ef444433"}),
+                        html.Div(id="fused-temp-breakdown", style={"fontSize":"9px","marginTop":"4px"}),
+                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                              "borderRadius":"10px","border":"1px solid #ef444433"}),
                     # Kelembaban
                     html.Div([
-                        html.Div("💧 Kelembaban", style={"fontSize": "11px", "color": "#94a3b8",
-                            "textTransform": "uppercase", "marginBottom": "4px"}),
+                        html.Div("💧 Kelembaban", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
                         html.Div([
-                            html.Span(id="fused-humidity",
-                                      style={"fontSize": "28px", "fontWeight": "800", "color": "#f1f5f9"}),
-                            html.Span("%", style={"fontSize": "14px", "color": "#64748b", "marginLeft": "4px"}),
+                            html.Span(id="fused-humidity", style={"fontSize":"22px","fontWeight":"800","color":"#3b82f6"}),
+                            html.Span(" %", style={"fontSize":"11px","color":"#64748b"}),
                         ]),
-                        html.Div(id="fused-humidity-breakdown",
-                                 style={"marginTop": "8px", "fontSize": "10px"}),
-                    ], style={"flex": "1", "minWidth": "140px", "padding": "12px",
-                              "background": "#0f172a", "borderRadius": "10px",
-                              "border": "1px solid #3b82f633"}),
+                        html.Div(id="fused-humidity-breakdown", style={"fontSize":"9px","marginTop":"4px"}),
+                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                              "borderRadius":"10px","border":"1px solid #3b82f633"}),
                     # CH
                     html.Div([
-                        html.Div("🌧️ Curah Hujan", style={"fontSize": "11px", "color": "#94a3b8",
-                            "textTransform": "uppercase", "marginBottom": "4px"}),
+                        html.Div("🌧 CH", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
                         html.Div([
-                            html.Span(id="fused-rain",
-                                      style={"fontSize": "28px", "fontWeight": "800", "color": "#f1f5f9"}),
-                            html.Span("mm/jam", style={"fontSize": "11px", "color": "#64748b", "marginLeft": "4px"}),
+                            html.Span(id="fused-rain", style={"fontSize":"22px","fontWeight":"800","color":"#06b6d4"}),
+                            html.Span(" mm/h", style={"fontSize":"11px","color":"#64748b"}),
                         ]),
-                        html.Div(id="fused-rain-breakdown",
-                                 style={"marginTop": "8px", "fontSize": "10px"}),
-                    ], style={"flex": "1", "minWidth": "140px", "padding": "12px",
-                              "background": "#0f172a", "borderRadius": "10px",
-                              "border": "1px solid #06b6d433"}),
+                        html.Div(id="fused-rain-breakdown", style={"fontSize":"9px","marginTop":"4px"}),
+                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                              "borderRadius":"10px","border":"1px solid #06b6d433"}),
                     # Angin
                     html.Div([
-                        html.Div("💨 Kec. Angin", style={"fontSize": "11px", "color": "#94a3b8",
-                            "textTransform": "uppercase", "marginBottom": "4px"}),
+                        html.Div("💨 Angin", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
                         html.Div([
-                            html.Span(id="fused-wind",
-                                      style={"fontSize": "28px", "fontWeight": "800", "color": "#f1f5f9"}),
-                            html.Span("m/s", style={"fontSize": "11px", "color": "#64748b", "marginLeft": "4px"}),
+                            html.Span(id="fused-wind", style={"fontSize":"22px","fontWeight":"800","color":"#8b5cf6"}),
+                            html.Span(" m/s", style={"fontSize":"11px","color":"#64748b"}),
                         ]),
-                        html.Div(id="fused-wind-breakdown",
-                                 style={"marginTop": "8px", "fontSize": "10px"}),
-                    ], style={"flex": "1", "minWidth": "140px", "padding": "12px",
-                              "background": "#0f172a", "borderRadius": "10px",
-                              "border": "1px solid #8b5cf633"}),
+                        html.Div(id="fused-wind-breakdown", style={"fontSize":"9px","marginTop":"4px"}),
+                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                              "borderRadius":"10px","border":"1px solid #8b5cf633"}),
+                    # Tekanan
+                    html.Div([
+                        html.Div("🔵 Tekanan", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
+                        html.Div([
+                            html.Span(id="val-pressure", style={"fontSize":"22px","fontWeight":"800","color":"#f59e0b"}),
+                            html.Span(" hPa", style={"fontSize":"11px","color":"#64748b"}),
+                        ]),
+                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                              "borderRadius":"10px","border":"1px solid #f59e0b33"}),
+                    # UV
+                    html.Div([
+                        html.Div("☀️ UV Index", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
+                        html.Div([
+                            html.Span(id="val-uv", style={"fontSize":"22px","fontWeight":"800","color":"#eab308"}),
+                        ]),
+                        html.Div(id="val-uv-status", style={"fontSize":"9px","marginTop":"4px"}),
+                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                              "borderRadius":"10px","border":"1px solid #eab30833"}),
+                    # ET0
+                    html.Div([
+                        html.Div("🌿 ET₀", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
+                        html.Div([
+                            html.Span(id="val-et0", style={"fontSize":"22px","fontWeight":"800","color":"#10b981"}),
+                            html.Span(" mm/d", style={"fontSize":"11px","color":"#64748b"}),
+                        ]),
+                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                              "borderRadius":"10px","border":"1px solid #10b98133"}),
                     # Kondisi BMKG
                     html.Div([
-                        html.Div("📡 Kondisi BMKG", style={"fontSize": "11px", "color": "#94a3b8",
-                            "textTransform": "uppercase", "marginBottom": "4px"}),
+                        html.Div("📡 BMKG", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
                         html.Div(id="fused-bmkg-desc",
-                                 style={"fontSize": "14px", "fontWeight": "700",
-                                        "color": "#38bdf8", "lineHeight": "1.4"}),
-                        html.Div([
-                        html.Span("Sumber: ", style={"fontSize": "10px", "color": "#475569"}),
-                        html.A("© BMKG – data.bmkg.go.id",
-                               href="https://data.bmkg.go.id/prakiraan-cuaca/",
+                                 style={"fontSize":"13px","fontWeight":"700","color":"#38bdf8","lineHeight":"1.4"}),
+                        html.A("© BMKG", href="https://data.bmkg.go.id/prakiraan-cuaca/",
                                target="_blank",
-                               style={"fontSize": "10px", "color": "#f59e0b",
-                                      "textDecoration": "none"}),
-                    ], style={"marginTop": "6px"}),
-                    ], style={"flex": "1", "minWidth": "140px", "padding": "12px",
-                              "background": "#0f172a", "borderRadius": "10px",
-                              "border": "1px solid #10b98133"}),
-                ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap"}),
-            ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "2px solid #1d4ed8",
-                "borderRadius": "12px",
-                "padding": "20px",
-                "boxShadow": "0 4px 24px rgba(29,78,216,0.25)",
-            }),
-        ], style={"marginBottom": "16px"}),
+                               style={"fontSize":"9px","color":"#f59e0b","textDecoration":"none"}),
+                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
+                              "borderRadius":"10px","border":"1px solid #10b98133"}),
+                ], style={"display":"flex","gap":"8px","flexWrap":"wrap"}),
 
-        # ── ROW 1B: OPEN-METEO CARDS (Tanah & Lingkungan) ──────────────────────
-        html.Div([
-            # Suhu Tanah
-            html.Div([
-                html.Div("🌱 Suhu & Kelembaban Tanah", style={"fontSize": "12px", "color": "#94a3b8",
-                    "fontWeight": "600", "textTransform": "uppercase", "marginBottom": "10px"}),
+                # Row 2 — Tanah compact
                 html.Div([
                     html.Div([
-                        html.Div("Permukaan (0cm)", style={"fontSize": "11px", "color": "#64748b"}),
-                        html.Span(id="val-soil-temp-0", style={"fontSize": "20px", "fontWeight": "700", "color": "#f97316"}),
-                        html.Span("°C", style={"fontSize": "12px", "color": "#64748b", "marginLeft": "3px"}),
-                    ], style={"flex": "1"}),
+                        html.Span("🌱 Suhu Tanah: ", style={"fontSize":"10px","color":"#64748b"}),
+                        html.Span(id="val-soil-temp-0", style={"fontSize":"11px","fontWeight":"700","color":"#f97316"}),
+                        html.Span(" K (0cm) | ", style={"fontSize":"10px","color":"#334155"}),
+                        html.Span(id="val-soil-temp-6", style={"fontSize":"11px","fontWeight":"700","color":"#f59e0b"}),
+                        html.Span(" K (6cm) | ", style={"fontSize":"10px","color":"#334155"}),
+                        html.Span(id="val-soil-temp-18", style={"fontSize":"11px","fontWeight":"700","color":"#eab308"}),
+                        html.Span(" K (18cm)", style={"fontSize":"10px","color":"#334155"}),
+                    ], style={"flex":"1"}),
                     html.Div([
-                        html.Div("Dalam (6cm)", style={"fontSize": "11px", "color": "#64748b"}),
-                        html.Span(id="val-soil-temp-6", style={"fontSize": "20px", "fontWeight": "700", "color": "#f59e0b"}),
-                        html.Span("°C", style={"fontSize": "12px", "color": "#64748b", "marginLeft": "3px"}),
-                    ], style={"flex": "1"}),
+                        html.Span("💦 Kelembaban Tanah: ", style={"fontSize":"10px","color":"#64748b"}),
+                        html.Span(id="val-soil-moist-0", style={"fontSize":"11px","fontWeight":"700","color":"#38bdf8"}),
+                        html.Span(id="val-soil-moist-0-status", style={"fontSize":"9px","color":"#475569"}),
+                        html.Span(" m³/m³ (0-1cm) | ", style={"fontSize":"10px","color":"#334155"}),
+                        html.Span(id="val-soil-moist-1", style={"fontSize":"11px","fontWeight":"700","color":"#06b6d4"}),
+                        html.Span(id="val-soil-moist-1-status", style={"fontSize":"9px","color":"#475569"}),
+                        html.Span(" m³/m³ (1-3cm) | ", style={"fontSize":"10px","color":"#334155"}),
+                        html.Span(id="val-soil-moist-3", style={"fontSize":"11px","fontWeight":"700","color":"#3b82f6"}),
+                        html.Span(id="val-soil-moist-3-status", style={"fontSize":"9px","color":"#475569"}),
+                        html.Span(" m³/m³ (3-9cm)", style={"fontSize":"10px","color":"#334155"}),
+                    ], style={"flex":"1"}),
                     html.Div([
-                        html.Div("Dalam (18cm)", style={"fontSize": "11px", "color": "#64748b"}),
-                        html.Span(id="val-soil-temp-18", style={"fontSize": "20px", "fontWeight": "700", "color": "#eab308"}),
-                        html.Span("°C", style={"fontSize": "12px", "color": "#64748b", "marginLeft": "3px"}),
-                    ], style={"flex": "1"}),
-                ], style={"display": "flex", "gap": "12px"}),
+                        html.Span("💨 Arah Angin: ", style={"fontSize":"10px","color":"#64748b"}),
+                        html.Span(id="val-wind-dir", style={"fontSize":"11px","fontWeight":"700","color":"#8b5cf6"}),
+                        html.Span("° ", style={"fontSize":"10px","color":"#334155"}),
+                        html.Span(id="val-wind-dir-label", style={"fontSize":"10px","color":"#64748b"}),
+                        html.Span(" | 🌫 Titik Embun: ", style={"fontSize":"10px","color":"#64748b"}),
+                        html.Span(id="val-dewpoint", style={"fontSize":"11px","fontWeight":"700","color":"#a78bfa"}),
+                        html.Span(" K", style={"fontSize":"10px","color":"#334155"}),
+                        html.Span(" | ☁️ Awan: ", style={"fontSize":"10px","color":"#64748b"}),
+                        html.Span(id="val-cloud", style={"fontSize":"11px","fontWeight":"700","color":"#94a3b8"}),
+                        html.Span(" %", style={"fontSize":"10px","color":"#334155"}),
+                    ], style={"flex":"1"}),
+                ], style={"display":"flex","gap":"16px","flexWrap":"wrap",
+                          "marginTop":"10px","padding":"8px 0",
+                          "borderTop":"1px solid #1e293b"}),
             ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #f97316 33", "borderRadius": "12px",
-                "padding": "16px 20px", "flex": "1", "minWidth": "260px",
-                "boxShadow": "0 4px 20px #f9731622",
+                "background":"linear-gradient(135deg, #1e293b, #0f172a)",
+                "border":"2px solid #1d4ed8",
+                "borderRadius":"12px","padding":"16px 20px",
+                "boxShadow":"0 4px 24px rgba(29,78,216,0.2)",
             }),
-            # Kelembaban Tanah
-            html.Div([
-                html.Div("💦 Kelembaban Tanah", style={"fontSize": "12px", "color": "#94a3b8",
-                    "fontWeight": "600", "textTransform": "uppercase", "marginBottom": "10px"}),
-                html.Div([
-                    html.Div([
-                        html.Div("0–1 cm", style={"fontSize": "11px", "color": "#64748b"}),
-                        html.Span(id="val-soil-moist-0", style={"fontSize": "18px", "fontWeight": "700", "color": "#38bdf8"}),
-                        html.Div(id="val-soil-moist-0-status", style={"fontSize": "10px", "marginTop": "2px"}),
-                    ], style={"flex": "1"}),
-                    html.Div([
-                        html.Div("1–3 cm", style={"fontSize": "11px", "color": "#64748b"}),
-                        html.Span(id="val-soil-moist-1", style={"fontSize": "18px", "fontWeight": "700", "color": "#06b6d4"}),
-                        html.Div(id="val-soil-moist-1-status", style={"fontSize": "10px", "marginTop": "2px"}),
-                    ], style={"flex": "1"}),
-                    html.Div([
-                        html.Div("3–9 cm", style={"fontSize": "11px", "color": "#64748b"}),
-                        html.Span(id="val-soil-moist-3", style={"fontSize": "18px", "fontWeight": "700", "color": "#3b82f6"}),
-                        html.Div(id="val-soil-moist-3-status", style={"fontSize": "10px", "marginTop": "2px"}),
-                    ], style={"flex": "1"}),
-                ], style={"display": "flex", "gap": "12px"}),
-            ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #38bdf833", "borderRadius": "12px",
-                "padding": "16px 20px", "flex": "1", "minWidth": "260px",
-                "boxShadow": "0 4px 20px #38bdf822",
-            }),
-            # UV & Titik Embun
-            html.Div([
-                html.Div("☀️ Indeks UV & Atmosfer", style={"fontSize": "12px", "color": "#94a3b8",
-                    "fontWeight": "600", "textTransform": "uppercase", "marginBottom": "10px"}),
-                html.Div([
-                    html.Div([
-                        html.Div("Indeks UV", style={"fontSize": "11px", "color": "#64748b"}),
-                        html.Span(id="val-uv", style={"fontSize": "22px", "fontWeight": "700", "color": "#eab308"}),
-                        html.Div(id="val-uv-status", style={"fontSize": "10px", "marginTop": "2px"}),
-                    ], style={"flex": "1"}),
-                    html.Div([
-                        html.Div("Titik Embun", style={"fontSize": "11px", "color": "#64748b"}),
-                        html.Span(id="val-dewpoint", style={"fontSize": "22px", "fontWeight": "700", "color": "#a78bfa"}),
-                        html.Span("°C", style={"fontSize": "12px", "color": "#64748b", "marginLeft": "3px"}),
-                    ], style={"flex": "1"}),
-                    html.Div([
-                        html.Div("Tutupan Awan", style={"fontSize": "11px", "color": "#64748b"}),
-                        html.Span(id="val-cloud", style={"fontSize": "22px", "fontWeight": "700", "color": "#94a3b8"}),
-                        html.Span("%", style={"fontSize": "12px", "color": "#64748b", "marginLeft": "3px"}),
-                    ], style={"flex": "1"}),
-                ], style={"display": "flex", "gap": "12px"}),
-            ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #eab30833", "borderRadius": "12px",
-                "padding": "16px 20px", "flex": "1", "minWidth": "260px",
-                "boxShadow": "0 4px 20px #eab30822",
-            }),
-            # Evapotranspirasi & Angin
-            html.Div([
-                html.Div("🌬️ Evapotranspirasi & Angin", style={"fontSize": "12px", "color": "#94a3b8",
-                    "fontWeight": "600", "textTransform": "uppercase", "marginBottom": "10px"}),
-                html.Div([
-                    html.Div([
-                        html.Div("Evapotranspirasi", style={"fontSize": "11px", "color": "#64748b"}),
-                        html.Span(id="val-et0", style={"fontSize": "22px", "fontWeight": "700", "color": "#10b981"}),
-                        html.Span("mm/hr", style={"fontSize": "11px", "color": "#64748b", "marginLeft": "3px"}),
-                    ], style={"flex": "1"}),
-                    html.Div([
-                        html.Div("Arah Angin", style={"fontSize": "11px", "color": "#64748b"}),
-                        html.Span(id="val-wind-dir", style={"fontSize": "22px", "fontWeight": "700", "color": "#8b5cf6"}),
-                        html.Div(id="val-wind-dir-label", style={"fontSize": "10px", "color": "#64748b", "marginTop": "2px"}),
-                    ], style={"flex": "1"}),
-                ], style={"display": "flex", "gap": "12px"}),
-            ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #10b98133", "borderRadius": "12px",
-                "padding": "16px 20px", "flex": "1", "minWidth": "220px",
-                "boxShadow": "0 4px 20px #10b98122",
-            }),
-        ], style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "marginBottom": "16px"}),
+        ], style={"marginBottom":"16px"}),
 
-        # ── ROW 1C: GRAFIK PRAKIRAAN 7 HARI OPEN-METEO ──────────────────────
+                # ── ROW 1C: PRAKIRAAN TERPADU ──────────────────────────────────────
         html.Div([
             html.Div([
-                html.H3("📅 Prakiraan 7 Hari – Open-Meteo",
-                        style={"color": "#38bdf8", "margin": "0 0 12px", "fontSize": "15px", "fontWeight": "600"}),
+                html.H3("📅 Prakiraan 7 Hari",
+                        style={"color":"#38bdf8","margin":"0 0 10px","fontSize":"14px","fontWeight":"600"}),
                 dcc.Graph(id="chart-openmeteo-daily", config={"displayModeBar": False},
-                          style={"height": "220px"}),
+                          style={"height":"200px"}),
             ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #1e40af33", "borderRadius": "12px",
-                "padding": "20px", "flex": "2",
+                "background":"linear-gradient(135deg, #1e293b, #0f172a)",
+                "border":"1px solid #1e40af33","borderRadius":"12px",
+                "padding":"16px","flex":"2","minWidth":"300px",
             }),
             html.Div([
-                html.H3("🌱 Tren Kelembaban Tanah 24 Jam",
-                        style={"color": "#38bdf8", "margin": "0 0 12px", "fontSize": "15px", "fontWeight": "600"}),
+                html.H3("🌱 Kelembaban Tanah 24 Jam",
+                        style={"color":"#38bdf8","margin":"0 0 10px","fontSize":"14px","fontWeight":"600"}),
                 dcc.Graph(id="chart-soil-moisture", config={"displayModeBar": False},
-                          style={"height": "220px"}),
+                          style={"height":"200px"}),
             ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #1e40af33", "borderRadius": "12px",
-                "padding": "20px", "flex": "1", "minWidth": "300px",
+                "background":"linear-gradient(135deg, #1e293b, #0f172a)",
+                "border":"1px solid #1e40af33","borderRadius":"12px",
+                "padding":"16px","flex":"1","minWidth":"260px",
             }),
-        ], style={"display": "flex", "gap": "16px", "marginBottom": "16px", "flexWrap": "wrap"}),
+        ], style={"display":"flex","gap":"12px","marginBottom":"16px","flexWrap":"wrap"}),
 
-        # ── ROW 2: KONDISI & MAP ────────────────────────────────────────────
+                # ── ROW 2: KONDISI & MAP ────────────────────────────────────────────
         html.Div([
 
             # Panel kiri: kondisi cuaca + prakiraan
@@ -1189,36 +1041,6 @@ app.layout = html.Div([
 
         ], style={"display": "flex", "gap": "16px", "marginBottom": "16px", "flexWrap": "wrap"}),
 
-        # ── ROW 3: REALTIME + ALERT LOG ─────────────────────────────────────
-        html.Div([
-            html.Div([
-                html.H3("📈 Data Real-Time (24 Jam Terakhir)",
-                        style={"color": "#38bdf8", "margin": "0 0 12px", "fontSize": "15px", "fontWeight": "600"}),
-                dcc.Graph(id="chart-realtime", config={"displayModeBar": False},
-                          style={"height": "260px"}),
-            ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #1e40af33",
-                "borderRadius": "12px",
-                "padding": "20px",
-                "flex": "2",
-            }),
-            html.Div([
-                html.H3("🔔 Log Peringatan",
-                        style={"color": "#f59e0b", "margin": "0 0 12px", "fontSize": "15px", "fontWeight": "600"}),
-                html.Div(id="alert-log-container",
-                         style={"maxHeight": "260px", "overflowY": "auto",
-                                "fontSize": "12px", "color": "#cbd5e1"}),
-            ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #f59e0b33",
-                "borderRadius": "12px",
-                "padding": "20px",
-                "flex": "1",
-                "minWidth": "260px",
-            }),
-        ], style={"display": "flex", "gap": "16px", "marginBottom": "16px", "flexWrap": "wrap"}),
-
         # ── ROW 4: TREN HISTORIS ────────────────────────────────────────────
         html.Div([
             html.Div([
@@ -1333,7 +1155,25 @@ app.layout = html.Div([
                      style={"display": "flex", "gap": "12px", "flexWrap": "wrap"}),
         ], style={"marginBottom": "16px"}),
 
-        # ── TELEGRAM PANEL ──────────────────────────────────────────────────
+        # ── API HEALTH CHECK PANEL ─────────────────────────────────────────────
+        html.Div([
+            html.Div([
+                html.H3("🔍 Status API & Koneksi",
+                        style={"color": "#38bdf8", "margin": "0", "fontSize": "15px", "fontWeight": "600"}),
+                html.Div(id="health-overall-badge"),
+            ], style={"display": "flex", "justifyContent": "space-between",
+                      "alignItems": "center", "marginBottom": "14px"}),
+            html.Div(id="health-cards",
+                     style={"display": "flex", "gap": "10px", "flexWrap": "wrap"}),
+            html.Div(id="health-checked-at",
+                     style={"fontSize": "11px", "color": "#475569", "marginTop": "10px"}),
+        ], style={
+            "background": "linear-gradient(135deg, #1e293b, #0f172a)",
+            "border": "1px solid #1e40af33", "borderRadius": "12px",
+            "padding": "20px", "marginBottom": "16px",
+        }),
+
+                # ── TELEGRAM PANEL ──────────────────────────────────────────────────
         html.Div([
             html.H3("📨 Kirim Notifikasi Telegram Manual",
                     style={"color": "#38bdf8", "margin": "0 0 12px", "fontSize": "15px", "fontWeight": "600"}),
@@ -1392,329 +1232,6 @@ def update_weather_store(_):
     return fetch_weather()
 
 # 2. Update metric cards
-@app.callback(
-    [Output("header-datetime", "children"),
-     Output("val-temp", "children"),
-     Output("val-humidity", "children"),
-     Output("val-rain1h", "children"),
-     Output("val-wind", "children"),
-     Output("val-pressure", "children"),
-     Output("val-vis", "children"),
-     Output("weather-description", "children"),
-     Output("weather-feelslike", "children"),
-     Output("alert-badge", "children"),
-     Output("store-alert-log", "data"),
-    ],
-    [Input("interval-realtime", "n_intervals"),
-     Input("store-weather", "data")],
-    [State("store-alert-log", "data")],
-)
-def update_metrics(_, weather, alert_log):
-    if not weather:
-        weather = fetch_weather()
-    if alert_log is None:
-        alert_log = []
-
-    now_str = now_wib().strftime("%A, %d %b %Y  %H:%M:%S WIB")
-    temp    = weather["main"]["temp"]
-    hum     = weather["main"]["humidity"]
-    fl      = weather["main"]["feels_like"]
-    pres    = weather["main"]["pressure"]
-    wind    = weather["wind"]["speed"]
-    vis     = round(weather.get("visibility", 10000) / 1000, 1)
-    desc    = weather["weather"][0]["description"].capitalize()
-    rain1h  = weather.get("rain", {}).get("1h", 0)
-
-    # Update realtime buffer
-    realtime_buffer.append({
-        "time": now_wib(),
-        "rainfall_mm": round(rain1h, 2),
-    })
-
-    # Alert check
-    level_color = "#22c55e"
-    level_text  = "NORMAL"
-    if rain1h >= THRESHOLD_RT["AWAS"]:
-        level_color, level_text = "#ef4444", "⚠️ AWAS"
-        check_and_alert(rain1h)
-        alert_log.append({"time": now_wib().strftime("%H:%M"), "level": "AWAS", "rain": rain1h})
-    elif rain1h >= THRESHOLD_RT["SIAGA"]:
-        level_color, level_text = "#f97316", "⚠️ SIAGA"
-        check_and_alert(rain1h)
-        alert_log.append({"time": now_wib().strftime("%H:%M"), "level": "SIAGA", "rain": rain1h})
-    elif rain1h >= THRESHOLD_RT["WASPADA"]:
-        level_color, level_text = "#eab308", "⚡ WASPADA"
-        check_and_alert(rain1h)
-        alert_log.append({"time": now_wib().strftime("%H:%M"), "level": "WASPADA", "rain": rain1h})
-
-    badge = html.Span(level_text, style={
-        "background": level_color + "22",
-        "color": level_color,
-        "border": f"1px solid {level_color}",
-        "borderRadius": "6px",
-        "padding": "2px 10px",
-        "fontSize": "12px",
-        "fontWeight": "700",
-    })
-
-    return (
-        now_str,
-        f"{temp:.1f}", f"{hum}", f"{rain1h:.1f}", f"{wind:.1f}",
-        f"{pres}", f"{vis}",
-        f"🌤 {desc}",
-        f"Terasa seperti {fl:.1f}°C",
-        badge,
-        alert_log[-50:],
-    )
-
-# 3. Alert log display
-@app.callback(
-    Output("alert-log-container", "children"),
-    Input("store-alert-log", "data"),
-)
-def render_alert_log(logs):
-    if not logs:
-        return html.Div("Tidak ada peringatan aktif.", style={"color": "#475569"})
-    colors = {"AWAS": "#ef4444", "SIAGA": "#f97316", "WASPADA": "#eab308", "NORMAL": "#22c55e"}
-    rows = []
-    for entry in reversed(logs[-20:]):
-        c = colors.get(entry["level"], "#94a3b8")
-        rows.append(html.Div([
-            html.Span(entry["time"], style={"color": "#64748b", "marginRight": "8px"}),
-            html.Span(entry["level"], style={"color": c, "fontWeight": "700", "marginRight": "8px"}),
-            html.Span(f"{entry['rain']:.1f} mm/jam"),
-        ], style={"padding": "4px 0", "borderBottom": "1px solid #1e293b"}))
-    return rows
-
-# 4. Realtime chart
-@app.callback(
-    Output("chart-realtime", "figure"),
-    Input("interval-realtime", "n_intervals"),
-)
-def update_realtime(_):
-    buf = list(realtime_buffer)
-    times = [b["time"] for b in buf]
-    vals  = [b["rainfall_mm"] for b in buf]
-
-    fig = go.Figure()
-    # Area fill
-    fig.add_trace(go.Scatter(
-        x=times, y=vals,
-        mode="lines",
-        line=dict(color="#38bdf8", width=2),
-        fill="tozeroy",
-        fillcolor="rgba(56,189,248,0.15)",
-        name="CH (mm/jam)",
-    ))
-    # Threshold lines
-    for label, val, color in [
-        ("Waspada", THRESHOLD_RT["WASPADA"], "#eab308"),
-        ("Siaga",   THRESHOLD_RT["SIAGA"],   "#f97316"),
-        ("Awas",    THRESHOLD_RT["AWAS"],    "#ef4444"),
-    ]:
-        fig.add_hline(y=val, line_dash="dash", line_color=color,
-                      annotation_text=label, annotation_position="left",
-                      annotation_font_color=color, line_width=1)
-
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#94a3b8", size=11),
-        margin=dict(l=40, r=20, t=20, b=30),
-        xaxis=dict(showgrid=False, tickformat="%H:%M"),
-        yaxis=dict(showgrid=True, gridcolor="#1e293b", title="mm/jam"),
-        hovermode="x unified",
-        legend=dict(orientation="h", y=-0.2),
-    )
-    return fig
-
-# 5. Forecast chart
-@app.callback(
-    Output("chart-forecast", "figure"),
-    Input("store-weather", "data"),
-)
-def update_forecast(_):
-    fc   = fetch_forecast()
-    rows = []
-    for item in fc.get("list", []):
-        rows.append({
-            "dt":   item["dt_txt"],
-            "temp": item["main"]["temp"],
-            "rain": item.get("rain", {}).get("3h", 0),
-        })
-    df_fc = pd.DataFrame(rows)
-    if df_fc.empty:
-        return go.Figure()
-    df_fc["dt"] = pd.to_datetime(df_fc["dt"])
-
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=df_fc["dt"], y=df_fc["rain"],
-                         name="CH (mm/3jam)", marker_color="#38bdf8", opacity=0.7, yaxis="y"))
-    fig.add_trace(go.Scatter(x=df_fc["dt"], y=df_fc["temp"],
-                             name="Suhu (°C)", line=dict(color="#f97316", width=2), yaxis="y2"))
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#94a3b8", size=10),
-        margin=dict(l=40, r=40, t=10, b=30),
-        xaxis=dict(showgrid=False, tickformat="%d/%m %H:%M", tickangle=-30),
-        yaxis=dict(showgrid=True, gridcolor="#1e293b", title="mm"),
-        yaxis2=dict(overlaying="y", side="right", showgrid=False, title="°C"),
-        barmode="overlay",
-        legend=dict(orientation="h", y=-0.35),
-        hovermode="x unified",
-    )
-    return fig
-
-# 6. Historical chart
-@app.callback(
-    Output("chart-historical", "figure"),
-    [Input("hist-view", "value"),
-     Input("year-range", "value")],
-)
-def update_historical(view, year_range):
-    global df_hist
-    if df_hist is None:
-        df_hist = get_hist_data()
-    if df_hist is None:
-        return go.Figure()
-    df = df_hist[(df_hist["year"] >= year_range[0]) & (df_hist["year"] <= year_range[1])].copy()
-
-    DARK = dict(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#94a3b8", size=11),
-                margin=dict(l=50, r=20, t=30, b=40),
-                hovermode="x unified")
-
-    if view == "monthly":
-        grp = df.groupby("month")["rainfall"].mean().reset_index()
-        months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
-        grp["month_str"] = grp["month"].apply(lambda x: months[x-1])
-        fig = go.Figure(go.Bar(
-            x=grp["month_str"], y=grp["rainfall"].round(2),
-            marker=dict(color=grp["rainfall"],
-                        colorscale="Blues",
-                        showscale=True,
-                        colorbar=dict(title="mm")),
-            text=grp["rainfall"].round(1), textposition="outside",
-        ))
-        fig.update_layout(title="Rata-rata Curah Hujan Bulanan", **DARK,
-                          yaxis=dict(title="mm/hari", showgrid=True, gridcolor="#1e293b"),
-                          xaxis=dict(showgrid=False))
-
-    elif view == "annual":
-        grp = df.groupby("year")["rainfall"].sum().reset_index()
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=grp["year"], y=grp["rainfall"].round(0),
-                             marker_color="#38bdf8", opacity=0.8, name="Total CH"))
-        fig.add_trace(go.Scatter(x=grp["year"],
-                                 y=grp["rainfall"].rolling(3, center=True).mean(),
-                                 line=dict(color="#f97316", width=2), name="Tren 3-thn"))
-        fig.update_layout(title="Total Curah Hujan Tahunan", **DARK,
-                          yaxis=dict(title="mm/tahun", showgrid=True, gridcolor="#1e293b"),
-                          xaxis=dict(showgrid=False))
-
-    elif view == "scatter":
-        sample = df.sample(min(3000, len(df)))
-        fig = px.scatter(sample, x="date", y="rainfall", color="rainfall",
-                         color_continuous_scale="Blues",
-                         labels={"rainfall": "CH (mm)", "date": "Tanggal"},
-                         title="Distribusi Harian Curah Hujan")
-        fig.update_layout(**DARK,
-                          coloraxis_colorbar=dict(title="mm"),
-                          xaxis=dict(showgrid=False),
-                          yaxis=dict(showgrid=True, gridcolor="#1e293b"))
-
-    elif view == "heatmap":
-        pivot = df.pivot_table(index="month", columns="year", values="rainfall",
-                               aggfunc="mean").fillna(0)
-        months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
-        fig = go.Figure(go.Heatmap(
-            z=pivot.values,
-            x=pivot.columns.astype(str),
-            y=[months[m-1] for m in pivot.index],
-            colorscale="YlOrRd",
-            colorbar=dict(title="mm/hari"),
-        ))
-        fig.update_layout(title="Heatmap Rata-rata CH (Bulan × Tahun)", **DARK,
-                          yaxis=dict(autorange="reversed"))
-
-    elif view == "extreme":
-        extreme = df[df["rainfall"] >= 50].groupby("year").size().reset_index(name="count")
-        fig = go.Figure(go.Bar(x=extreme["year"], y=extreme["count"],
-                               marker=dict(color=extreme["count"],
-                                           colorscale="Reds", showscale=True,
-                                           colorbar=dict(title="Hari")),
-                               text=extreme["count"], textposition="outside"))
-        fig.update_layout(title="Jumlah Hari Hujan Ekstrem (>50 mm) per Tahun", **DARK,
-                          yaxis=dict(title="Hari", showgrid=True, gridcolor="#1e293b"),
-                          xaxis=dict(showgrid=False))
-
-    return fig
-
-# 7. Stat summary cards
-@app.callback(
-    Output("stat-cards", "children"),
-    Input("year-range", "value"),
-)
-def update_stat_cards(year_range):
-    global df_hist
-    if df_hist is None:
-        df_hist = get_hist_data()
-    if df_hist is None:
-        return []
-    df = df_hist[(df_hist["year"] >= year_range[0]) & (df_hist["year"] <= year_range[1])]
-    stats = [
-        ("📅 Total Hari",        f"{len(df):,}",    "#3b82f6"),
-        ("💧 Rata-rata Harian",  f"{df['rainfall'].mean():.2f} mm",  "#06b6d4"),
-        ("🌧️ Hari Hujan",        f"{(df['rainfall'] > 0.5).sum():,}","#8b5cf6"),
-        ("⛈️ Hari Ekstrem (>50mm)",f"{(df['rainfall'] > 50).sum():,}","#ef4444"),
-        ("📈 Maks Harian",       f"{df['rainfall'].max():.1f} mm",   "#f59e0b"),
-        ("📊 Total Periode",     f"{df['rainfall'].sum()/1000:.1f} m",  "#10b981"),
-    ]
-    cards = []
-    for label, value, color in stats:
-        cards.append(html.Div([
-            html.Div(label, style={"fontSize": "11px", "color": "#94a3b8",
-                                   "textTransform": "uppercase", "letterSpacing": "0.05em"}),
-            html.Div(value, style={"fontSize": "20px", "fontWeight": "700", "color": "#f1f5f9",
-                                   "marginTop": "4px"}),
-        ], style={
-            "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-            "border": f"1px solid {color}44",
-            "borderRadius": "10px",
-            "padding": "14px 18px",
-            "flex": "1",
-            "minWidth": "130px",
-            "boxShadow": f"0 2px 12px {color}22",
-        }))
-    return cards
-
-# 8. Telegram manual send
-@app.callback(
-    Output("telegram-status", "children"),
-    [Input("btn-send-telegram", "n_clicks"),
-     Input("btn-test-telegram", "n_clicks")],
-    [State("telegram-msg", "value")],
-    prevent_initial_call=True,
-)
-def handle_telegram(n_send, n_test, msg):
-    ctx = callback_context
-    if not ctx.triggered:
-        return ""
-    btn_id = ctx.triggered[0]["prop_id"].split(".")[0]
-    if btn_id == "btn-test-telegram":
-        ok = send_telegram(
-            f"✅ <b>Tes Koneksi Berhasil</b>\n"
-            f"📍 {LOCATION_NAME}\n"
-            f"🕐 {now_wib().strftime('%d %b %Y %H:%M WIB')}\n"
-            f"Dashboard berfungsi normal."
-        )
-        return "✅ Koneksi OK!" if ok else "❌ Gagal – cek token/chat ID"
-    elif btn_id == "btn-send-telegram":
-        if not msg or len(msg.strip()) < 3:
-            return "⚠️ Pesan kosong!"
-        ok = send_telegram(f"📢 <b>Notifikasi Manual</b>\n{msg}")
-        return "✅ Terkirim!" if ok else "❌ Gagal kirim"
-    return ""
-
 
 # ─── CALLBACK: UPDATE BMKG STORE ─────────────────────────────────────────────
 @app.callback(
@@ -1743,9 +1260,6 @@ def update_fused_store(owm, meteo, bmkg):
     Input("year-range", "value"),
 )
 def update_hist_title(year_range):
-    global df_hist
-    if df_hist is None:
-        df_hist = get_hist_data()
     return f"📊 Analisis Tren Historis ({year_range[0]}–{year_range[1]})"
 
 # ─── CALLBACK: TAMPILKAN FUSION PANEL ─────────────────────────────────────────
@@ -1819,11 +1333,11 @@ def update_fusion_panel(fused):
     cm_wind = {"BMKG": "#a78bfa", "OpenWeather": "#8b5cf6", "Open-Meteo": "#7c3aed"}
 
     return (
-        f"{temp:.1f}", f"{hum:.0f}", f"{rain:.1f}", f"{wind:.1f}",
+        f"{temp + 273.15:.1f}", f"{hum:.0f}", f"{rain:.1f}", f"{wind:.1f}",
         desc,
-        make_bd("temp",     "°C",   cm_temp),
+        make_bd("temp",     "K",    cm_temp),
         make_bd("humidity", "%",    cm_hum),
-        make_bd("rain",     "mm",   cm_rain),
+        make_bd("rain",     "mm/h", cm_rain),
         make_bd("wind",     "m/s",  cm_wind),
         badge,
     )
@@ -1854,6 +1368,7 @@ def update_openmeteo_store(_):
      Output("val-et0",              "children"),
      Output("val-wind-dir",         "children"),
      Output("val-wind-dir-label",   "children"),
+     Output("val-pressure",         "children"),
     ],
     [Input("interval-openmeteo", "n_intervals"),
      Input("store-openmeteo",    "data")],
@@ -1892,15 +1407,17 @@ def update_openmeteo_cards(_, data):
     def sm_span(txt, clr):
         return html.Span(txt, style={"color": clr, "fontWeight": "600"})
 
+    pressure = c.get("surface_pressure", 1013.0)
     return (
-        f"{st0:.1f}", f"{st6:.1f}", f"{st18:.1f}",
-        f"{sm0:.2f}", sm_span(sm0_txt, sm0_clr),
-        f"{sm1:.2f}", sm_span(sm1_txt, sm1_clr),
-        f"{sm3:.2f}", sm_span(sm3_txt, sm3_clr),
+        f"{st0+273.15:.1f}", f"{st6+273.15:.1f}", f"{st18+273.15:.1f}",
+        f"{sm0:.3f}", sm_span(sm0_txt, sm0_clr),
+        f"{sm1:.3f}", sm_span(sm1_txt, sm1_clr),
+        f"{sm3:.3f}", sm_span(sm3_txt, sm3_clr),
         f"{uv:.1f}",  html.Span(uv_txt, style={"color": uv_clr, "fontWeight": "600"}),
-        f"{dew:.1f}", f"{cld}",
-        f"{et0:.1f}", f"{wdir:.0f}°",
+        f"{dew+273.15:.1f}", f"{cld}",
+        f"{et0:.2f}", f"{wdir:.0f}",
         html.Span(f"({wind_label})", style={"color": "#64748b"}),
+        f"{pressure:.0f}",
     )
 
 # ─── CALLBACK: GRAFIK PRAKIRAAN 7 HARI ────────────────────────────────────────
@@ -1921,9 +1438,11 @@ def update_openmeteo_daily(data):
     fig = go.Figure()
     fig.add_trace(go.Bar(x=times, y=ch, name="CH (mm)", marker_color="#38bdf8",
                          opacity=0.8, yaxis="y"))
-    fig.add_trace(go.Scatter(x=times, y=tmax, name="Suhu Maks °C",
+    tmax_k = [t + 273.15 for t in tmax] if tmax else []
+    tmin_k = [t + 273.15 for t in tmin] if tmin else []
+    fig.add_trace(go.Scatter(x=times, y=tmax_k, name="Suhu Maks (K)",
                              line=dict(color="#ef4444", width=2), yaxis="y2"))
-    fig.add_trace(go.Scatter(x=times, y=tmin, name="Suhu Min °C",
+    fig.add_trace(go.Scatter(x=times, y=tmin_k, name="Suhu Min (K)",
                              line=dict(color="#3b82f6", width=2, dash="dot"), yaxis="y2"))
     fig.add_trace(go.Scatter(x=times, y=uv, name="UV Maks",
                              line=dict(color="#eab308", width=1.5, dash="dash"), yaxis="y3"))
@@ -2288,227 +1807,7 @@ def toggle_cuaca(n):
     }
     return _make_zone_layer(ZONA_CUACA, on), style
 
-# ─── CALLBACK: HITUNG INDEKS RISIKO ──────────────────────────────────────────
-@app.callback(
-    Output("store-risiko", "data"),
-    Input("interval-risiko", "n_intervals"),
-)
-def update_risiko_store(_):
-    """
-    Hitung indeks risiko setiap 30 menit.
-    Ambil data real-time dari Open-Meteo + CHIRPS Supabase.
-    """
-    try:
-        # Ambil data Open-Meteo untuk RH, ET0, WS real-time
-        om = fetch_openmeteo()
-        curr = om.get("current", {})
-        rh   = float(curr.get("relative_humidity_2m", 80) or 80)
-        ws   = float(curr.get("wind_speed_10m", 2) or 2) / 3.6  # km/h → m/s
-        et0  = float(om.get("daily", {}).get("et0_fao_evapotranspiration", [3])[0] or 3)
 
-        # Ambil CH harian terbaru dari Supabase
-        global _df_hist_cache
-        if _df_hist_cache is None:
-            _df_hist_cache = load_historical()
-
-        ch_h, cum3, cum7 = 0.0, 0.0, 0.0
-        if _df_hist_cache is not None and len(_df_hist_cache) > 0:
-            df = _df_hist_cache.sort_values("date")
-            if len(df) >= 1:
-                ch_h = float(df.iloc[-1]["rainfall"] or 0)
-            if len(df) >= 3:
-                cum3 = float(df.iloc[-3:]["rainfall"].sum() or 0)
-            if len(df) >= 7:
-                cum7 = float(df.iloc[-7:]["rainfall"].sum() or 0)
-
-        hasil = hitung_indeks_risiko(ch_h, cum3, cum7, rh, et0, ws)
-        hasil["updated_at"] = datetime.now(WIB).strftime("%d %b %Y %H:%M WIB")
-
-        # Multi-variate threshold check
-        mv_awas    = THRESHOLD_MULTIVAR["awas"](ch_h, cum3, cum7, rh, et0, ws)
-        mv_siaga   = THRESHOLD_MULTIVAR["siaga"](ch_h, cum3, cum7, rh, et0, ws)
-        mv_waspada = THRESHOLD_MULTIVAR["waspada"](ch_h, cum3, cum7, rh, et0, ws)
-
-        if mv_awas:
-            mv_level = "AWAS"
-        elif mv_siaga:
-            mv_level = "SIAGA"
-        elif mv_waspada:
-            mv_level = "WASPADA"
-        else:
-            mv_level = "NORMAL"
-
-        hasil["mv_level"] = mv_level
-        hasil["mv_awas"]  = mv_awas
-
-        # Notifikasi Telegram jika level AWAS dari multi-variate
-        if mv_awas:
-            try:
-                msg = (
-                    f"🔴 *AWAS MULTI-VARIATE — Desa Petir*\n"
-                    f"━━━━━━━━━━━━━━━━━━━━\n"
-                    f"⚠️ Indeks Risiko: *{hasil['indeks']}/100*\n"
-                    f"🌧 CH Harian   : *{ch_h:.1f} mm* (threshold: ≥{THRESHOLD['ch_h']['awas']} mm)\n"
-                    f"📊 Kum 3 Hari  : *{cum3:.1f} mm* (threshold: ≥{THRESHOLD['cum3']['awas']} mm)\n"
-                    f"💧 Kelembaban  : *{rh:.0f}%* (threshold: ≥{THRESHOLD['rh']['awas']}%)\n"
-                    f"🌿 ET0         : *{et0:.1f} mm* (threshold: ≤{THRESHOLD['et0']['awas']} mm)\n"
-                    f"⏰ {hasil['updated_at']}\n"
-                    f"📍 Desa Petir, Dramaga, Bogor"
-                )
-                kirim_telegram(msg)
-            except Exception:
-                pass
-
-        return hasil
-
-    except Exception as e:
-        print(f"⚠️  Indeks risiko error: {e}")
-        return hitung_indeks_risiko(0, 0, 0)
-
-# ─── CALLBACK: TAMPILKAN GAUGE INDEKS RISIKO ──────────────────────────────────
-@app.callback(
-    [Output("risiko-gauge",       "figure"),
-     Output("risiko-level-badge", "children"),
-     Output("risiko-mv-badge",    "children"),
-     Output("risiko-breakdown",   "children"),
-     Output("risiko-bars",        "children"),
-     Output("risiko-updated",     "children")],
-    Input("store-risiko", "data"),
-)
-def update_risiko_display(data):
-    if not data:
-        data = hitung_indeks_risiko(0, 0, 0)
-
-    indeks = data.get("indeks", 0)
-    level  = data.get("level",  "NORMAL")
-    warna  = data.get("warna",  "#22c55e")
-    emoji  = data.get("emoji",  "🟢")
-    skor   = data.get("skor",   {})
-    inp    = data.get("input",  {})
-    updated= data.get("updated_at", "-")
-
-    # ── Gauge meter ──────────────────────────────────────────────
-    fig = go.Figure(go.Indicator(
-        mode  = "gauge+number",
-        value = indeks,
-        title = {"text": "Indeks Risiko", "font": {"size": 13, "color": "#94a3b8"}},
-        number= {"font": {"size": 32, "color": warna}, "suffix": ""},
-        gauge = {
-            "axis":  {"range": [0, 100], "tickwidth": 1,
-                      "tickcolor": "#334155", "tickfont": {"size": 9}},
-            "bar":   {"color": warna, "thickness": 0.25},
-            "bgcolor": "#0f172a",
-            "borderwidth": 1,
-            "bordercolor": "#1e293b",
-            "steps": [
-                {"range": [0,  25], "color": "#14532d33"},
-                {"range": [25, 50], "color": "#78350f33"},
-                {"range": [50, 75], "color": "#9a3412 33"},
-                {"range": [75,100], "color": "#7f1d1d33"},
-            ],
-            "threshold": {
-                "line":  {"color": warna, "width": 3},
-                "thickness": 0.75,
-                "value": indeks,
-            },
-        },
-    ))
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor ="rgba(0,0,0,0)",
-        margin=dict(l=20, r=20, t=40, b=10),
-        font=dict(color="#94a3b8"),
-    )
-
-    # ── Badge level ───────────────────────────────────────────────
-    badge = html.Div([
-        html.Span(f"{emoji} {level}",
-                  style={"fontSize": "22px", "fontWeight": "800",
-                         "color": warna}),
-        html.Br(),
-        html.Span(f"Indeks: {indeks}/100",
-                  style={"fontSize": "12px", "color": "#94a3b8"}),
-    ])
-
-    # ── Breakdown nilai input ──────────────────────────────────────
-    breakdown = html.Table([
-        html.Tbody([
-            html.Tr([
-                html.Td("CH Harian",      style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
-                html.Td(f"{inp.get('ch_h',0):.1f} mm", style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
-            ]),
-            html.Tr([
-                html.Td("Kumulatif 3 Hari", style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
-                html.Td(f"{inp.get('cum3',0):.1f} mm", style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
-            ]),
-            html.Tr([
-                html.Td("Kumulatif 7 Hari", style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
-                html.Td(f"{inp.get('cum7',0):.1f} mm", style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
-            ]),
-            html.Tr([
-                html.Td("Kelembaban Udara", style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
-                html.Td(f"{inp.get('rh',0):.0f}%",    style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
-            ]),
-            html.Tr([
-                html.Td("Evapotranspirasi", style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
-                html.Td(f"{inp.get('et0',0):.1f} mm", style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
-            ]),
-            html.Tr([
-                html.Td("Kec. Angin",      style={"fontSize":"10px","color":"#94a3b8","paddingRight":"8px"}),
-                html.Td(f"{inp.get('ws',0):.1f} m/s", style={"fontSize":"10px","color":"#f1f5f9","fontWeight":"600"}),
-            ]),
-        ])
-    ])
-
-    # ── Progress bar per parameter ────────────────────────────────
-    param_config = [
-        ("CH Harian",       skor.get("ch_h",0), 30,  "#3b82f6"),
-        ("Kum. 3 Hari",     skor.get("cum3",0), 25,  "#8b5cf6"),
-        ("Kum. 7 Hari",     skor.get("cum7",0), 20,  "#06b6d4"),
-        ("Kelembaban",      skor.get("rh",  0), 15,  "#10b981"),
-        ("Evapotranspirasi",skor.get("et0", 0),  5,  "#f59e0b"),
-        ("Angin",           skor.get("ws",  0),  5,  "#ef4444"),
-    ]
-
-    bars = []
-    for label, nilai, max_w, color in param_config:
-        pct = (nilai / max_w * 100) if max_w > 0 else 0
-        bars.append(html.Div([
-            html.Div([
-                html.Span(label, style={"fontSize":"10px","color":"#94a3b8","width":"130px","display":"inline-block"}),
-                html.Span(f"{nilai:.1f}/{max_w}", style={"fontSize":"10px","color":"#64748b","marginLeft":"4px"}),
-            ], style={"display":"flex","alignItems":"center","marginBottom":"2px"}),
-            html.Div([
-                html.Div(style={
-                    "width": f"{min(pct,100):.0f}%",
-                    "height": "6px",
-                    "background": color,
-                    "borderRadius": "3px",
-                    "transition": "width 0.5s ease",
-                }),
-            ], style={"background":"#1e293b","borderRadius":"3px","height":"6px","marginBottom":"6px"}),
-        ]))
-
-    updated_text = f"🕐 Update: {updated} | Interval: 30 menit"
-    # Badge multi-variate
-    mv_level = data.get("mv_level", "NORMAL")
-    mv_colors = {"NORMAL": "#22c55e", "WASPADA": "#eab308",
-                 "SIAGA": "#f97316", "AWAS": "#ef4444"}
-    mv_color = mv_colors.get(mv_level, "#22c55e")
-    mv_icons = {"NORMAL": "🟢", "WASPADA": "🟡", "SIAGA": "🟠", "AWAS": "🔴"}
-
-    mv_badge = html.Div([
-        html.Span("Multi-Variate: ", style={"fontSize":"10px","color":"#64748b"}),
-        html.Span(f"{mv_icons.get(mv_level,'')} {mv_level}",
-                  style={"fontSize":"11px","fontWeight":"700","color":mv_color}),
-        html.Span(" (CH+RH+ET0+WS)",
-                  style={"fontSize":"9px","color":"#475569","marginLeft":"4px"}),
-    ], style={"background":f"{mv_color}11","border":f"1px solid {mv_color}44",
-              "borderRadius":"6px","padding":"4px 8px","display":"inline-block"})
-
-    return fig, badge, mv_badge, breakdown, bars, updated_text
-
-# ─── CALLBACK: UPDATE MICROMET STORE ─────────────────────────────────────────
 @app.callback(
     Output("store-micromet", "data"),
     Input("interval-micromet", "n_intervals"),
@@ -2705,51 +2004,6 @@ def update_micromet_stats(data):
     return cards
 
 # ─── CALLBACK: SUPABASE REALTIME TRIGGER ─────────────────────────────────────
-@app.callback(
-    Output("store-realtime-trigger", "data"),
-    Input("interval-realtime", "n_intervals"),
-)
-def realtime_trigger(n):
-    """
-    Cek data terbaru dari Supabase setiap 30 detik.
-    Jika ada data baru → update cache → trigger refresh grafik.
-    """
-    global _df_hist_cache
-    _sb_url = os.getenv("SUPABASE_URL", "")
-    _sb_key = os.getenv("SUPABASE_ANON_KEY", "")
-    try:
-        if not _sb_url or not _sb_key:
-            return n
-
-        # Cek tanggal terbaru di Supabase
-        url = (f"{_sb_url}/rest/v1/rainfall_daily"
-               f"?select=date,rainfall_mm&order=date.desc&limit=3")
-        headers = {
-            "apikey":        _sb_key,
-            "Authorization": f"Bearer {_sb_key}",
-        }
-        r = requests.get(url, headers=headers, timeout=8)
-        if r.status_code != 200:
-            return n
-
-        latest_rows = r.json()
-        if not latest_rows:
-            return n
-
-        latest_date = latest_rows[0].get("date","")
-
-        # Bandingkan dengan cache
-        if _df_hist_cache is not None and len(_df_hist_cache) > 0:
-            cache_latest = _df_hist_cache.iloc[-1]["date"].strftime("%Y-%m-%d")
-            if latest_date > cache_latest:
-                # Ada data baru! Reset cache agar di-reload
-                print(f"🔄 Supabase realtime: data baru {latest_date} → reset cache")
-                _df_hist_cache = None
-
-    except Exception as e:
-        print(f"⚠️  Realtime check error: {e}")
-
-    return n
 
 # ─── CALLBACK: UPDATE HEALTH STORE ───────────────────────────────────────────
 @app.callback(
