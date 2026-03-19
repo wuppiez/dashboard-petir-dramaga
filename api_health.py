@@ -111,18 +111,17 @@ def check_bmkg_cap():
     return r
 
 def check_chirps():
-    # Cek apakah server CHIRPS bisa diakses
-    from datetime import timedelta
-    test_date = datetime.now(WIB) - timedelta(days=10)
-    url = (f"https://data.chc.ucsb.edu/products/CHIRPS-2.0"
-           f"/global_daily/tifs/p05/{test_date.year}/"
-           f"chirps-v2.0.{test_date.year}.{test_date.month:02d}"
-           f".{test_date.day:02d}.tif.gz")
-    r = _check("NASA CHIRPS", url, timeout=12)
-    # 200 atau 206 = OK
-    if r["status_code"] in (200, 206):
-        r["status"] = "online"
-        r["label"]  = "Online"
+    # Cek data CHIRPS via Supabase (data sudah tersimpan di DB lokal)
+    if not SUPABASE_URL or SUPABASE_URL == "YOUR_SUPABASE_URL":
+        return _skip("NASA CHIRPS", "Supabase URL belum diset")
+    url = (f"{SUPABASE_URL}/rest/v1/rainfall_daily"
+           f"?select=date,rainfall_mm&order=date.desc&limit=1")
+    headers = {
+        "apikey":        SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+    }
+    r = _check("NASA CHIRPS", url, timeout=10, headers=headers)
+    r["desc"] = "Data CH harian"
     return r
 
 def check_supabase():
