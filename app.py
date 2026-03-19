@@ -2407,7 +2407,7 @@ def _handle_tg_command(chat_id, text):
     text = text.strip().lower().split("@")[0]
     if text in ("/start", "/help"):
         _tg_send(chat_id,
-            "🌧️ <b>Bot Hidrometeorologi – Desa Petir</b>\n\n"
+            "🌧️ <b>Bot Informasi Cuaca Desa Petir</b>\n\n"
             "/status  – Status cuaca sekarang\n"
             "/cuaca   – Parameter cuaca lengkap\n"
             "/hujan   – Curah hujan hari ini\n"
