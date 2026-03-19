@@ -46,7 +46,7 @@ def get_weather():
 # ── Command handlers ─────────────────────────────────────────────────────────
 def cmd_help(chat_id):
     msg = (
-        "🌧️ <b>Bot Hidrometeorologi – Desa Petir</b>\n\n"
+        "🌧️ <b>Bot Informasi Cuaca Desa Petir</b>\n\n"
         "Perintah yang tersedia:\n"
         "/status  – Status cuaca singkat\n"
         "/cuaca   – Info cuaca lengkap\n"
