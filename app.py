@@ -583,22 +583,39 @@ def uv_status(val):
 last_alert_level = {"level": None, "time": datetime(2000, 1, 1, tzinfo=WIB)}
 
 def send_telegram(message: str) -> bool:
+    """Kirim pesan ke Telegram. Return True jika berhasil."""
     try:
-        if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
-            print("ERROR: TELEGRAM_BOT_TOKEN belum diisi di Render!")
+        token = TELEGRAM_BOT_TOKEN
+        chat  = TELEGRAM_CHAT_ID
+        if not token or token == "YOUR_TELEGRAM_BOT_TOKEN":
+            print("⚠️  TELEGRAM_BOT_TOKEN belum diisi di Render env vars!")
             return False
-        if not TELEGRAM_CHAT_ID or TELEGRAM_CHAT_ID == "YOUR_TELEGRAM_CHAT_ID":
-            print("ERROR: TELEGRAM_CHAT_ID belum diisi di Render!")
+        if not chat or chat == "YOUR_TELEGRAM_CHAT_ID":
+            print("⚠️  TELEGRAM_CHAT_ID belum diisi di Render env vars!")
             return False
-        url  = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
-        r    = requests.post(url, data=data, timeout=10)
-        if r.status_code != 200:
-            print(f"ERROR Telegram API {r.status_code}: {r.text}")
+        url  = f"https://api.telegram.org/bot{token}/sendMessage"
+        resp = requests.post(url, json={
+            "chat_id":    chat,
+            "text":       message,
+            "parse_mode": "HTML",
+        }, timeout=12)
+        if resp.status_code == 200:
+            print(f"✅ Telegram terkirim ({len(message)} chars)")
+            return True
+        else:
+            # Coba kirim ulang tanpa HTML jika error parse
+            resp2 = requests.post(url, json={
+                "chat_id": chat,
+                "text":    message.replace("<b>","").replace("</b>","")
+                                  .replace("<i>","").replace("</i>",""),
+            }, timeout=12)
+            if resp2.status_code == 200:
+                print(f"✅ Telegram terkirim (plain text fallback)")
+                return True
+            print(f"❌ Telegram error {resp.status_code}: {resp.text[:200]}")
             return False
-        return True
     except Exception as e:
-        print(f"ERROR Telegram exception: {e}")
+        print(f"❌ Telegram exception: {e}")
         return False
 
 def check_and_alert(rainfall_1h: float):
@@ -1090,49 +1107,6 @@ app.layout = html.Div([
 
         ], style={"display": "flex", "gap": "16px", "marginBottom": "16px", "flexWrap": "wrap"}),
 
-        # ── ROW 4: TREN HISTORIS ────────────────────────────────────────────
-        html.Div([
-            html.Div([
-                html.Div([
-                    html.H3(id="hist-title", children="📊 Analisis Tren Historis",
-                            style={"color": "#38bdf8", "margin": "0", "fontSize": "15px", "fontWeight": "600"}),
-                    html.Div([
-                        dcc.Dropdown(
-                            id="hist-view",
-                            options=[
-                                {"label": "Rata-rata Bulanan", "value": "monthly"},
-                                {"label": "Total Tahunan",     "value": "annual"},
-                                {"label": "Tren Harian (scatter)", "value": "scatter"},
-                                {"label": "Heatmap Bulan × Tahun", "value": "heatmap"},
-                                {"label": "Hari Hujan Ekstrem (>50mm)", "value": "extreme"},
-                            ],
-                            value="monthly",
-                            clearable=False,
-                            style={"width": "220px", "fontSize": "13px"},
-                        ),
-                        dcc.RangeSlider(
-                            id="year-range",
-                            min=2005,
-                            max=2026,
-                            step=1,
-                            value=[2021, 2026],
-                            marks={y: str(y) for y in range(2005, 2027, 5)},
-                            tooltip={"always_visible": False},
-                        ),
-                    ], style={"display": "flex", "alignItems": "center", "gap": "16px", "flexWrap": "wrap"}),
-                ], style={"display": "flex", "justifyContent": "space-between",
-                          "alignItems": "center", "marginBottom": "12px", "flexWrap": "wrap", "gap": "12px"}),
-                dcc.Graph(id="chart-historical", config={"displayModeBar": True},
-                          style={"height": "320px"}),
-            ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #1e40af33",
-                "borderRadius": "12px",
-                "padding": "20px",
-                "flex": "1",
-            }),
-        ], style={"display": "flex", "gap": "16px", "marginBottom": "16px"}),
-
         # ── ROW RISIKO: INDEKS RISIKO LONGSOR ──────────────────────────────────
         html.Div([
             html.Div([
@@ -1198,6 +1172,50 @@ app.layout = html.Div([
                 "boxShadow":"0 4px 24px rgba(245,158,11,0.1)",
             }),
         ], style={"marginBottom":"16px"}),
+
+
+        # ── ROW 4: TREN HISTORIS ────────────────────────────────────────────
+        html.Div([
+            html.Div([
+                html.Div([
+                    html.H3(id="hist-title", children="📊 Analisis Tren Historis",
+                            style={"color": "#38bdf8", "margin": "0", "fontSize": "15px", "fontWeight": "600"}),
+                    html.Div([
+                        dcc.Dropdown(
+                            id="hist-view",
+                            options=[
+                                {"label": "Rata-rata Bulanan", "value": "monthly"},
+                                {"label": "Total Tahunan",     "value": "annual"},
+                                {"label": "Tren Harian (scatter)", "value": "scatter"},
+                                {"label": "Heatmap Bulan × Tahun", "value": "heatmap"},
+                                {"label": "Hari Hujan Ekstrem (>50mm)", "value": "extreme"},
+                            ],
+                            value="monthly",
+                            clearable=False,
+                            style={"width": "220px", "fontSize": "13px"},
+                        ),
+                        dcc.RangeSlider(
+                            id="year-range",
+                            min=2005,
+                            max=2026,
+                            step=1,
+                            value=[2021, 2026],
+                            marks={y: str(y) for y in range(2005, 2027, 5)},
+                            tooltip={"always_visible": False},
+                        ),
+                    ], style={"display": "flex", "alignItems": "center", "gap": "16px", "flexWrap": "wrap"}),
+                ], style={"display": "flex", "justifyContent": "space-between",
+                          "alignItems": "center", "marginBottom": "12px", "flexWrap": "wrap", "gap": "12px"}),
+                dcc.Graph(id="chart-historical", config={"displayModeBar": True},
+                          style={"height": "320px"}),
+            ], style={
+                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
+                "border": "1px solid #1e40af33",
+                "borderRadius": "12px",
+                "padding": "20px",
+                "flex": "1",
+            }),
+        ], style={"display": "flex", "gap": "16px", "marginBottom": "16px"}),
 
         # ── ROW 5: STATISTIK RINGKASAN ──────────────────────────────────────
         html.Div([
@@ -1302,17 +1320,23 @@ app.layout = html.Div([
                            "padding": "10px", "resize": "vertical"},
                 ),
                 html.Div([
-                    html.Button("Kirim ke Telegram 📨", id="btn-send-telegram",
+                    html.Button("📨 Kirim Pesan", id="btn-send-telegram",
+                                n_clicks=0,
                                 style={"background": "#1d4ed8", "color": "white",
                                        "border": "none", "borderRadius": "8px",
                                        "padding": "10px 20px", "cursor": "pointer",
-                                       "fontWeight": "600", "fontSize": "13px"}),
-                    html.Button("Tes Koneksi Telegram ✅", id="btn-test-telegram",
+                                       "fontWeight": "600", "fontSize": "13px",
+                                       "transition": "opacity 0.2s"}),
+                    html.Button("✅ Tes Koneksi", id="btn-test-telegram",
+                                n_clicks=0,
                                 style={"background": "#065f46", "color": "white",
                                        "border": "none", "borderRadius": "8px",
                                        "padding": "10px 20px", "cursor": "pointer",
-                                       "fontWeight": "600", "fontSize": "13px"}),
-                    html.Span(id="telegram-status", style={"fontSize": "13px", "color": "#94a3b8"}),
+                                       "fontWeight": "600", "fontSize": "13px",
+                                       "transition": "opacity 0.2s"}),
+                    html.Div(id="telegram-status",
+                             style={"fontSize": "13px", "color": "#94a3b8",
+                                    "padding": "6px 0"}),
                 ], style={"display": "flex", "gap": "10px", "alignItems": "center",
                           "marginTop": "10px", "flexWrap": "wrap"}),
             ]),
@@ -2505,25 +2529,84 @@ server = app.server   # <── baris ini yang dibaca Gunicorn
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=8050)
 
+# ─── CALLBACK: TELEGRAM MANUAL & TES KONEKSI ─────────────────────────────────
+@app.callback(
+    Output("telegram-status", "children"),
+    [Input("btn-send-telegram", "n_clicks"),
+     Input("btn-test-telegram", "n_clicks")],
+    State("telegram-msg", "value"),
+    prevent_initial_call=True,
+)
+def handle_telegram_buttons(n_send, n_test, msg_text):
+    from dash import callback_context as ctx
+    if not ctx.triggered:
+        return ""
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    now_str = now_wib().strftime("%H:%M WIB")
+
+    if triggered_id == "btn-test-telegram":
+        ok = send_telegram(
+            f"✅ <b>Tes Koneksi Berhasil</b>\n"
+            f"📍 Dashboard Hidrometeorologi Desa Petir\n"
+            f"🕐 {now_wib().strftime('%d %b %Y %H:%M WIB')}\n"
+            f"Bot terhubung dan siap mengirim notifikasi."
+        )
+        if ok:
+            return html.Span("✅ Koneksi OK! Pesan tes terkirim.",
+                             style={"color":"#22c55e","fontWeight":"600"})
+        return html.Span("❌ Gagal! Cek TELEGRAM_BOT_TOKEN & TELEGRAM_CHAT_ID di Render.",
+                         style={"color":"#ef4444","fontWeight":"600"})
+
+    if triggered_id == "btn-send-telegram":
+        if not msg_text or not msg_text.strip():
+            return html.Span("⚠️ Tulis pesan terlebih dahulu.",
+                             style={"color":"#f59e0b"})
+        ok = send_telegram(
+            f"📨 <b>Notifikasi Manual — {now_str}</b>\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"{msg_text.strip()}\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📍 Desa Petir, Dramaga, Bogor"
+        )
+        if ok:
+            return html.Span(f"✅ Terkirim pukul {now_str}.",
+                             style={"color":"#22c55e","fontWeight":"600"})
+        return html.Span("❌ Gagal kirim. Cek konfigurasi Telegram.",
+                         style={"color":"#ef4444","fontWeight":"600"})
+    return ""
+
 # ─── CALLBACK: HITUNG INDEKS RISIKO ──────────────────────────────────────────
 @app.callback(
     Output("store-risiko", "data"),
     [Input("interval-risiko",  "n_intervals"),
-     Input("store-openmeteo",  "data")],
+     Input("store-openmeteo",  "data"),
+     Input("store-fused",      "data")],
 )
-def update_risiko_store(_, meteo_data):
-    """Hitung indeks risiko tiap 30 menit dari data real-time + CHIRPS terbaru."""
+def update_risiko_store(_, meteo_data, fused_data):
+    """Hitung indeks risiko dari data real-time + CHIRPS terbaru."""
     try:
         # Ambil data meteorologi dari Open-Meteo (RH, ET0, WS)
         if not meteo_data:
-            meteo_data = fetch_openmeteo()
+            try:
+                meteo_data = fetch_openmeteo()
+            except Exception:
+                meteo_data = {}
         curr  = meteo_data.get("current", {}) if meteo_data else {}
         daily = meteo_data.get("daily",   {}) if meteo_data else {}
 
-        rh    = curr.get("relative_humidity_2m", 80.0)
-        ws    = curr.get("wind_speed_10m",        2.0)
-        et0_l = daily.get("et0_fao_evapotranspiration", [3.0])
-        et0   = et0_l[0] if et0_l else 3.0
+        rh    = curr.get("relative_humidity_2m", None)
+        ws    = curr.get("wind_speed_10m",        None)
+        et0_l = daily.get("et0_fao_evapotranspiration", [])
+        et0   = et0_l[0] if et0_l else None
+
+        # Fallback ke data fused jika Open-Meteo tidak tersedia
+        if rh is None and fused_data:
+            rh = fused_data.get("humidity", 80.0)
+        if ws is None and fused_data:
+            ws = fused_data.get("wind", 2.0)
+        rh  = rh  if rh  is not None else 80.0
+        ws  = ws  if ws  is not None else 2.0
+        et0 = et0 if et0 is not None else 3.0
 
         # Ambil CH terbaru dari cache CHIRPS
         df = get_hist_data(full=False)
@@ -2576,6 +2659,28 @@ def update_risiko_store(_, meteo_data):
     Input("store-risiko", "data"),
 )
 def update_risiko_display(data):
+    if not data or not isinstance(data, dict):
+        data = {}
+    indeks_val = data.get("indeks", 0)
+    if indeks_val == 0 and not data.get("updated_at"):
+        # Data belum siap — tampilkan loading state
+        empty_fig = go.Figure()
+        empty_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=10, r=10, t=10, b=10),
+            annotations=[dict(
+                text="⏳ Menghitung...", xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color="#38bdf8")
+            )],
+        )
+        loading_span = html.Span("⏳ Menghitung indeks...",
+                                  style={"color":"#38bdf8","fontSize":"14px"})
+        loading_div  = html.Div("Menunggu data...",
+                                 style={"color":"#475569","fontSize":"11px"})
+        updated_txt  = html.Span("Belum ada data",
+                                  style={"fontSize":"10px","color":"#475569"})
+        return empty_fig, loading_span, loading_div, loading_div, updated_txt
     if not data:
         data = {"indeks": 0, "level": "NORMAL", "warna": "#22c55e",
                 "emoji": "🟢", "skor": {}, "input": {},
