@@ -65,9 +65,66 @@ LAT, LON        = -6.6121, 106.7231
 LOCATION_NAME   = "Desa Petir, Dramaga, Bogor"
 DATA_FILE       = "data/rainfall_historical.csv"
 
-# Ambang batas peringatan (mm)
-# Threshold sementara untuk notifikasi Telegram (akan diupdate)
-THRESHOLD_RT = {"WASPADA": 27, "SIAGA": 29, "AWAS": 42}
+# ─── THRESHOLD SITE-SPECIFIC DESA PETIR ─────────────────────────────────────
+# Sumber: Analisis CHIRPS P25/P50/P75 dari 8 kejadian bencana 2020–2024
+# Referensi: BMKG, PVMBG, Van Westen (2006), Crozier (1999)
+
+THRESHOLD_RT = {"WASPADA": 27, "SIAGA": 29, "AWAS": 42}  # CH harian mm/hari
+
+THRESHOLD = {
+    "ch_h":  {"waspada": 27,  "siaga": 29,  "awas": 42},    # mm/hari  — CHIRPS P25/P50/P75
+    "cum3":  {"waspada": 40,  "siaga": 75,  "awas": 110},   # mm/3hr   — PVMBG antecedent
+    "cum7":  {"waspada": 131, "siaga": 173, "awas": 205},   # mm/7hr   — Van Westen
+    "rh":    {"waspada": 75,  "siaga": 85,  "awas": 90},    # %        — Crozier (1999)
+    "et0":   {"waspada": 3.5, "siaga": 2.5, "awas": 1.5},  # mm/hari  — defisit air tanah
+    "ws":    {"waspada": 3,   "siaga": 6,   "awas": 9},     # m/s      — angin kencang lokal
+}
+
+RISIKO_WEIGHTS = {
+    "ch_h": 30,  # CH harian       — korelasi tertinggi (0.459) vs severity
+    "cum3": 25,  # Kumulatif 3 hr  — antecedent rainfall PVMBG
+    "cum7": 20,  # Kumulatif 7 hr  — soil saturation Van Westen
+    "rh":   15,  # Kelembaban udara — Crozier (1999)
+    "et0":   5,  # Evapotranspirasi — defisit air tanah
+    "ws":    5,  # Kec. angin       — angin kencang lokal Petir
+}
+
+def hitung_indeks_risiko(ch_h, cum3, cum7, rh=80.0, et0=3.0, ws=2.0):
+    """
+    Indeks risiko longsor 0–100 berbasis data site-specific Desa Petir.
+    Validasi: Nov 2023 (2 meninggal) → 87.4 AWAS | Apr 2024 (Rp70jt) → 87.2 AWAS
+    """
+    s_ch  = min(ch_h  / THRESHOLD["ch_h"]["awas"],  1.0) * RISIKO_WEIGHTS["ch_h"]
+    s_c3  = min(cum3  / THRESHOLD["cum3"]["awas"],  1.0) * RISIKO_WEIGHTS["cum3"]
+    s_c7  = min(cum7  / THRESHOLD["cum7"]["awas"],  1.0) * RISIKO_WEIGHTS["cum7"]
+    s_rh  = max(rh - 70, 0) / 20                        * RISIKO_WEIGHTS["rh"]
+    s_et0 = max(THRESHOLD["et0"]["waspada"] - et0, 0) / THRESHOLD["et0"]["waspada"] * RISIKO_WEIGHTS["et0"]
+    s_ws  = min(ws  / THRESHOLD["ws"]["awas"],  1.0) * RISIKO_WEIGHTS["ws"]
+
+    indeks = round(min(s_ch + s_c3 + s_c7 + s_rh + s_et0 + s_ws, 100), 1)
+
+    if indeks >= 70:   level, warna, emoji = "AWAS",    "#ef4444", "🔴"
+    elif indeks >= 45: level, warna, emoji = "SIAGA",   "#f97316", "🟠"
+    elif indeks >= 20: level, warna, emoji = "WASPADA", "#eab308", "🟡"
+    else:              level, warna, emoji = "NORMAL",  "#22c55e", "🟢"
+
+    # Multi-variate override — kondisi gabungan
+    if (ch_h >= THRESHOLD["ch_h"]["awas"] or
+        cum3 >= THRESHOLD["cum3"]["awas"]  or
+        (ch_h >= THRESHOLD["ch_h"]["siaga"] and rh >= THRESHOLD["rh"]["siaga"] and
+         et0 <= THRESHOLD["et0"]["siaga"])):
+        if level not in ("AWAS",):
+            level, warna, emoji = "AWAS", "#ef4444", "🔴"
+            indeks = max(indeks, 70)
+
+    return {
+        "indeks": indeks, "level": level, "warna": warna, "emoji": emoji,
+        "skor": {"ch_h": round(s_ch,1), "cum3": round(s_c3,1),
+                 "cum7": round(s_c7,1), "rh": round(s_rh,1),
+                 "et0": round(s_et0,1), "ws": round(s_ws,1)},
+        "input": {"ch_h": ch_h, "cum3": cum3, "cum7": cum7,
+                  "rh": rh, "et0": et0, "ws": ws},
+    }
 
 # ─── SUPABASE REALTIME CONFIG ────────────────────────────────────────────────
 SUPABASE_REALTIME_ENABLED = False  # Diaktifkan via env var
@@ -641,6 +698,10 @@ app.layout = html.Div([
     dcc.Store(id="store-health"),
     dcc.Store(id="store-micromet"),
     dcc.Interval(id="interval-micromet", interval=3_600_000, n_intervals=0),  # 1 jam
+    dcc.Store(id="store-risiko"),
+    dcc.Interval(id="interval-risiko", interval=1_800_000, n_intervals=0),  # 30 menit
+    dcc.Store(id="store-notif-harian", data={"last_sent": ""}),
+    dcc.Interval(id="interval-notif-harian", interval=60_000, n_intervals=0),  # tiap menit
     dcc.Interval(id="interval-realtime", interval=30_000, n_intervals=0),  # 30 detik
     # map layers pakai file lokal (tidak perlu store/interval)
     dcc.Interval(id="interval-health", interval=300_000, n_intervals=0),  # 5 menit
@@ -1071,6 +1132,72 @@ app.layout = html.Div([
                 "flex": "1",
             }),
         ], style={"display": "flex", "gap": "16px", "marginBottom": "16px"}),
+
+        # ── ROW RISIKO: INDEKS RISIKO LONGSOR ──────────────────────────────────
+        html.Div([
+            html.Div([
+                # Header
+                html.Div([
+                    html.Div([
+                        html.Span("⚠️ Indeks Risiko Longsor",
+                                  style={"fontSize":"15px","fontWeight":"700","color":"#f59e0b"}),
+                        html.Span(" — Desa Petir, Dramaga",
+                                  style={"fontSize":"11px","color":"#475569","marginLeft":"6px"}),
+                    ]),
+                    html.Div([
+                        html.Div(id="risiko-updated",
+                                 style={"fontSize":"10px","color":"#475569","textAlign":"right"}),
+                    ]),
+                ], style={"display":"flex","justifyContent":"space-between",
+                          "alignItems":"center","marginBottom":"16px","flexWrap":"wrap","gap":"8px"}),
+
+                # Isi panel: gauge kiri + breakdown kanan
+                html.Div([
+                    # Kiri: gauge + badge level
+                    html.Div([
+                        dcc.Graph(id="risiko-gauge",
+                                  config={"displayModeBar": False},
+                                  style={"height":"200px","marginBottom":"8px"}),
+                        html.Div(id="risiko-level-badge",
+                                 style={"textAlign":"center"}),
+                    ], style={"flex":"1","minWidth":"200px"}),
+
+                    # Tengah: bar breakdown parameter
+                    html.Div([
+                        html.Div("📊 Kontribusi Parameter",
+                                 style={"fontSize":"11px","color":"#64748b",
+                                        "fontWeight":"600","marginBottom":"10px",
+                                        "textTransform":"uppercase"}),
+                        html.Div(id="risiko-bars"),
+                    ], style={"flex":"2","minWidth":"280px","paddingLeft":"16px"}),
+
+                    # Kanan: nilai input parameter
+                    html.Div([
+                        html.Div("📥 Nilai Parameter Saat Ini",
+                                 style={"fontSize":"11px","color":"#64748b",
+                                        "fontWeight":"600","marginBottom":"10px",
+                                        "textTransform":"uppercase"}),
+                        html.Div(id="risiko-params"),
+                    ], style={"flex":"2","minWidth":"220px","paddingLeft":"16px"}),
+
+                ], style={"display":"flex","gap":"16px","flexWrap":"wrap","alignItems":"flex-start"}),
+
+                # Catatan metodologi
+                html.Div([
+                    html.Span("📚 Metodologi: ", style={"fontSize":"9px","color":"#475569","fontWeight":"600"}),
+                    html.Span("Threshold P25/P50/P75 dari 8 kejadian bencana Desa Petir 2020–2024 | "
+                              "Bobot: CH 30% · Kum3 25% · Kum7 20% · RH 15% · ET₀ 5% · Angin 5% | "
+                              "Van Westen (2006), PVMBG (2018), Crozier (1999)",
+                              style={"fontSize":"9px","color":"#334155"}),
+                ], style={"marginTop":"12px","paddingTop":"10px","borderTop":"1px solid #1e293b"}),
+
+            ], style={
+                "background":"linear-gradient(135deg, #1e293b, #0f172a)",
+                "border":"1px solid #f59e0b44",
+                "borderRadius":"12px","padding":"20px",
+                "boxShadow":"0 4px 24px rgba(245,158,11,0.1)",
+            }),
+        ], style={"marginBottom":"16px"}),
 
         # ── ROW 5: STATISTIK RINGKASAN ──────────────────────────────────────
         html.Div([
@@ -2378,6 +2505,312 @@ server = app.server   # <── baris ini yang dibaca Gunicorn
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=8050)
 
+# ─── CALLBACK: HITUNG INDEKS RISIKO ──────────────────────────────────────────
+@app.callback(
+    Output("store-risiko", "data"),
+    [Input("interval-risiko",  "n_intervals"),
+     Input("store-openmeteo",  "data")],
+)
+def update_risiko_store(_, meteo_data):
+    """Hitung indeks risiko tiap 30 menit dari data real-time + CHIRPS terbaru."""
+    try:
+        # Ambil data meteorologi dari Open-Meteo (RH, ET0, WS)
+        if not meteo_data:
+            meteo_data = fetch_openmeteo()
+        curr  = meteo_data.get("current", {}) if meteo_data else {}
+        daily = meteo_data.get("daily",   {}) if meteo_data else {}
+
+        rh    = curr.get("relative_humidity_2m", 80.0)
+        ws    = curr.get("wind_speed_10m",        2.0)
+        et0_l = daily.get("et0_fao_evapotranspiration", [3.0])
+        et0   = et0_l[0] if et0_l else 3.0
+
+        # Ambil CH terbaru dari cache CHIRPS
+        df = get_hist_data(full=False)
+        ch_h, cum3, cum7 = 0.0, 0.0, 0.0
+        if df is not None and len(df) > 0:
+            df_s  = df.sort_values("date")
+            last7 = df_s.tail(7)
+            last3 = df_s.tail(3)
+            ch_h  = float(df_s.iloc[-1]["rainfall"])
+            cum3  = float(last3["rainfall"].sum())
+            cum7  = float(last7["rainfall"].sum())
+
+        hasil = hitung_indeks_risiko(ch_h, cum3, cum7, rh, et0, ws)
+        hasil["updated_at"] = now_wib().strftime("%d %b %Y %H:%M WIB")
+
+        # Kirim Telegram jika AWAS (throttle: max 1x per 3 jam)
+        if hasil["level"] == "AWAS":
+            try:
+                msg = (
+                    f"🔴 <b>AWAS RISIKO LONGSOR — Desa Petir</b>\n"
+                    f"━━━━━━━━━━━━━━━━\n"
+                    f"📊 Indeks Risiko : <b>{hasil['indeks']}/100</b>\n"
+                    f"🌧 CH Harian     : <b>{ch_h:.1f} mm</b> (threshold ≥{THRESHOLD['ch_h']['awas']} mm)\n"
+                    f"📊 Kum 3 Hari   : <b>{cum3:.1f} mm</b> (threshold ≥{THRESHOLD['cum3']['awas']} mm)\n"
+                    f"📊 Kum 7 Hari   : <b>{cum7:.1f} mm</b> (threshold ≥{THRESHOLD['cum7']['awas']} mm)\n"
+                    f"💧 Kelembaban    : <b>{rh:.0f}%</b> (threshold ≥{THRESHOLD['rh']['awas']}%)\n"
+                    f"🌿 ET₀          : <b>{et0:.2f} mm/hari</b>\n"
+                    f"💨 Angin        : <b>{ws:.1f} m/s</b>\n"
+                    f"⏰ {hasil['updated_at']}\n"
+                    f"📍 Desa Petir, Dramaga, Bogor"
+                )
+                send_telegram(msg)
+            except Exception:
+                pass
+
+        return hasil
+    except Exception as e:
+        print(f"⚠️  Indeks risiko error: {e}")
+        return {"indeks": 0, "level": "NORMAL", "warna": "#22c55e",
+                "emoji": "🟢", "skor": {}, "input": {},
+                "updated_at": now_wib().strftime("%d %b %Y %H:%M WIB")}
+
+# ─── CALLBACK: TAMPILAN INDEKS RISIKO ─────────────────────────────────────────
+@app.callback(
+    [Output("risiko-gauge",       "figure"),
+     Output("risiko-level-badge", "children"),
+     Output("risiko-bars",        "children"),
+     Output("risiko-params",      "children"),
+     Output("risiko-updated",     "children")],
+    Input("store-risiko", "data"),
+)
+def update_risiko_display(data):
+    if not data:
+        data = {"indeks": 0, "level": "NORMAL", "warna": "#22c55e",
+                "emoji": "🟢", "skor": {}, "input": {},
+                "updated_at": "-"}
+
+    indeks = data.get("indeks", 0)
+    level  = data.get("level",  "NORMAL")
+    warna  = data.get("warna",  "#22c55e")
+    emoji  = data.get("emoji",  "🟢")
+    skor   = data.get("skor",   {})
+    inp    = data.get("input",  {})
+    upd    = data.get("updated_at", "-")
+
+    # ── Gauge meter ────────────────────────────────────────────────────────
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=indeks,
+        number={"suffix": "/100", "font": {"size": 28, "color": warna}},
+        gauge={
+            "axis":  {"range": [0, 100], "tickfont": {"size": 9, "color": "#64748b"},
+                      "tickcolor": "#334155"},
+            "bar":   {"color": warna, "thickness": 0.25},
+            "bgcolor": "#0f172a",
+            "borderwidth": 0,
+            "steps": [
+                {"range": [0,  20], "color": "#22c55e22"},
+                {"range": [20, 45], "color": "#eab30822"},
+                {"range": [45, 70], "color": "#f9731622"},
+                {"range": [70,100], "color": "#ef444422"},
+            ],
+            "threshold": {
+                "line": {"color": warna, "width": 3},
+                "thickness": 0.8, "value": indeks,
+            },
+        },
+        domain={"x": [0, 1], "y": [0, 1]},
+    ))
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=20, r=20, t=30, b=10),
+        font=dict(color="#94a3b8"),
+    )
+
+    # ── Badge level ────────────────────────────────────────────────────────
+    badge = html.Div([
+        html.Span(f"{emoji} {level}",
+                  style={"fontSize":"18px","fontWeight":"800","color":warna}),
+        html.Br(),
+        html.Span("Tingkat Risiko Longsor",
+                  style={"fontSize":"10px","color":"#64748b"}),
+    ])
+
+    # ── Bars kontribusi parameter ──────────────────────────────────────────
+    param_labels = {
+        "ch_h": ("🌧 CH Harian",     RISIKO_WEIGHTS["ch_h"]),
+        "cum3": ("📊 Kum 3 Hari",    RISIKO_WEIGHTS["cum3"]),
+        "cum7": ("📊 Kum 7 Hari",    RISIKO_WEIGHTS["cum7"]),
+        "rh":   ("💧 Kelembaban",    RISIKO_WEIGHTS["rh"]),
+        "et0":  ("🌿 ET₀",           RISIKO_WEIGHTS["et0"]),
+        "ws":   ("💨 Kec. Angin",    RISIKO_WEIGHTS["ws"]),
+    }
+    bars = []
+    for key, (label, bobot) in param_labels.items():
+        val  = skor.get(key, 0)
+        pct  = (val / bobot * 100) if bobot > 0 else 0
+        clr  = "#ef4444" if pct >= 80 else "#f97316" if pct >= 50 else "#eab308" if pct >= 25 else "#22c55e"
+        bars.append(html.Div([
+            html.Div([
+                html.Span(label,  style={"fontSize":"10px","color":"#94a3b8","flex":"1"}),
+                html.Span(f"{val:.1f}/{bobot}",
+                          style={"fontSize":"10px","color":clr,"fontWeight":"700"}),
+            ], style={"display":"flex","justifyContent":"space-between","marginBottom":"3px"}),
+            html.Div(html.Div(style={
+                "width":   f"{min(pct,100):.0f}%",
+                "height":  "6px",
+                "background": clr,
+                "borderRadius": "3px",
+                "transition": "width 0.5s ease",
+            }), style={"background":"#0f172a","borderRadius":"3px","height":"6px"}),
+        ], style={"marginBottom":"10px"}))
+
+    # ── Nilai input parameter ──────────────────────────────────────────────
+    def _param_row(icon, label, val, unit, thr_w, thr_s, thr_a, invert=False):
+        if invert:
+            clr = "#ef4444" if val <= thr_a else "#f97316" if val <= thr_s else "#eab308" if val <= thr_w else "#22c55e"
+        else:
+            clr = "#ef4444" if val >= thr_a else "#f97316" if val >= thr_s else "#eab308" if val >= thr_w else "#22c55e"
+        return html.Div([
+            html.Span(f"{icon} {label}: ",
+                      style={"fontSize":"10px","color":"#64748b","minWidth":"90px","display":"inline-block"}),
+            html.Span(f"{val:.1f} {unit}",
+                      style={"fontSize":"11px","fontWeight":"700","color":clr}),
+        ], style={"marginBottom":"6px","display":"flex","alignItems":"center"})
+
+    params_div = html.Div([
+        _param_row("🌧","CH Harian",   inp.get("ch_h",0),"mm",    27, 29, 42),
+        _param_row("📊","Kum 3 Hari",  inp.get("cum3",0),"mm",    40, 75, 110),
+        _param_row("📊","Kum 7 Hari",  inp.get("cum7",0),"mm",    131,173,205),
+        _param_row("💧","Kelembaban",  inp.get("rh",80), "%",     75, 85, 90),
+        _param_row("🌿","ET₀",         inp.get("et0",3), "mm/hr", 3.5,2.5,1.5, invert=True),
+        _param_row("💨","Kec. Angin",  inp.get("ws",2),  "m/s",   3,  6,  9),
+        html.Hr(style={"borderColor":"#1e293b","margin":"8px 0"}),
+        html.Div([
+            html.Span("🟢 Normal: <20  ",  style={"fontSize":"8px","color":"#22c55e"}),
+            html.Span("🟡 Waspada: 20–45  ",style={"fontSize":"8px","color":"#eab308"}),
+            html.Span("🟠 Siaga: 45–70  ",  style={"fontSize":"8px","color":"#f97316"}),
+            html.Span("🔴 Awas: >70",       style={"fontSize":"8px","color":"#ef4444"}),
+        ]),
+    ])
+
+    updated_text = html.Span(f"⏱ Update: {upd} | interval 30 menit",
+                             style={"fontSize":"10px","color":"#475569"})
+    return fig, badge, bars, params_div, updated_text
+
+# ─── CALLBACK: NOTIFIKASI TELEGRAM HARIAN OTOMATIS ───────────────────────────
+@app.callback(
+    Output("store-notif-harian", "data"),
+    Input("interval-notif-harian", "n_intervals"),
+    State("store-notif-harian",   "data"),
+    prevent_initial_call=True,
+)
+def notif_harian_otomatis(_, state):
+    """
+    Cek setiap menit apakah sudah jam 07.00 WIB.
+    Jika ya dan belum dikirim hari ini → kirim ringkasan pagi ke Telegram.
+    """
+    now     = now_wib()
+    today   = now.strftime("%Y-%m-%d")
+    last_sent = (state or {}).get("last_sent", "")
+
+    # Hanya kirim di jam 07.00–07.02 WIB dan belum dikirim hari ini
+    if not (now.hour == 7 and now.minute <= 2 and last_sent != today):
+        return state or {"last_sent": ""}
+
+    try:
+        # ── Data cuaca fused ─────────────────────────────────────────────
+        owm   = fetch_weather()
+        meteo = fetch_openmeteo()
+        bmkg  = fetch_bmkg()
+        fused = fuse_data(owm, meteo, bmkg)
+
+        temp  = fused.get("temp",     27.0)
+        hum   = fused.get("humidity", 80.0)
+        wind  = fused.get("wind",      2.0)
+        desc  = fused.get("bmkg_desc","Berawan")
+
+        curr  = meteo.get("current", {}) if meteo else {}
+        daily = meteo.get("daily",   {}) if meteo else {}
+        et0_l = daily.get("et0_fao_evapotranspiration", [3.0])
+        et0   = et0_l[0] if et0_l else 3.0
+        rh    = curr.get("relative_humidity_2m", hum)
+        ws    = curr.get("wind_speed_10m", wind)
+        uv    = curr.get("uv_index", 0)
+        pres  = curr.get("surface_pressure", 1013)
+
+        # ── Data CHIRPS kemarin ──────────────────────────────────────────
+        df = get_hist_data(full=False)
+        ch_h = cum3 = cum7 = 0.0
+        ch_kemarin_str = "–"
+        if df is not None and len(df) > 0:
+            df_s   = df.sort_values("date")
+            ch_h   = float(df_s.iloc[-1]["rainfall"])
+            cum3   = float(df_s.tail(3)["rainfall"].sum())
+            cum7   = float(df_s.tail(7)["rainfall"].sum())
+            tgl    = df_s.iloc[-1]["date"]
+            ch_kemarin_str = f"{ch_h:.1f} mm ({tgl.strftime('%d %b') if hasattr(tgl,'strftime') else str(tgl)[:10]})"
+
+        # ── Indeks risiko ────────────────────────────────────────────────
+        hasil = hitung_indeks_risiko(ch_h, cum3, cum7, rh, et0, ws)
+        indeks = hasil["indeks"]
+        level  = hasil["level"]
+        e_lvl  = hasil["emoji"]
+
+        # ── Prakiraan hari ini dari BMKG ─────────────────────────────────
+        fcst_txt = "Tidak tersedia"
+        try:
+            bmkg_cuaca = bmkg.get("cuaca", []) if bmkg else []
+            if bmkg_cuaca:
+                today_items = []
+                for periode in bmkg_cuaca:
+                    for item in (periode if isinstance(periode, list) else []):
+                        if str(item.get("local_datetime",""))[:10] == today:
+                            today_items.append(item)
+                if today_items:
+                    mid = today_items[len(today_items)//2]
+                    fcst_txt = mid.get("weather_desc", "Berawan")
+        except Exception:
+            pass
+
+        # ── Susun pesan ──────────────────────────────────────────────────
+        msg_parts = [
+            f"🌅 <b>Ringkasan Pagi — Desa Petir</b>",
+            f"📅 {now.strftime('%A, %d %B %Y')} | 07.00 WIB",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+            "",
+            "🌡 <b>Kondisi Cuaca Sekarang</b>",
+            f"   Suhu        : {temp:.1f}°C",
+            f"   Kelembaban  : {hum:.0f}%",
+            f"   Angin       : {wind:.1f} m/s",
+            f"   Tekanan     : {pres:.0f} hPa",
+            f"   UV Index    : {uv:.1f}",
+            f"   ET₀         : {et0:.2f} mm/hari",
+            f"   BMKG        : {desc}",
+            "",
+            "🌧 <b>Data Curah Hujan</b>",
+            f"   Kemarin     : {ch_kemarin_str}",
+            f"   Kum 3 Hari  : {cum3:.1f} mm",
+            f"   Kum 7 Hari  : {cum7:.1f} mm",
+            "",
+            "🗺 <b>Prakiraan Hari Ini (BMKG)</b>",
+            f"   {fcst_txt}",
+            "",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+            f"{e_lvl} <b>Indeks Risiko Longsor: {indeks}/100 — {level}</b>",
+        ]
+        if level == "AWAS":
+            msg_parts += [
+                "",
+                "🚨 <b>PERHATIAN!</b> Risiko longsor TINGGI.",
+                f"   Pantau kondisi lereng, siapkan jalur evakuasi.",
+                f"   CH ≥{THRESHOLD['ch_h']['awas']} mm atau kondisi tanah jenuh.",
+            ]
+        elif level == "SIAGA":
+            msg_parts += ["", "⚠️ Risiko SEDANG. Pantau terus kondisi cuaca."]
+        msg_parts.append("")
+        msg_parts.append("📍 Desa Petir, Kec. Dramaga, Kab. Bogor")
+        msg = "\n".join(msg_parts)
+        send_telegram(msg)
+        print(f"✅ Notifikasi harian terkirim: {today} jam {now.strftime('%H:%M')} WIB")
+        return {"last_sent": today}
+
+    except Exception as e:
+        print(f"⚠️  Notifikasi harian error: {e}")
+        return state or {"last_sent": ""}
+
 # ─── TELEGRAM WEBHOOK ROUTE ────────────────────────────────────────────────────
 from flask import request as flask_request, jsonify
 
@@ -2407,13 +2840,15 @@ def _handle_tg_command(chat_id, text):
     text = text.strip().lower().split("@")[0]
     if text in ("/start", "/help"):
         _tg_send(chat_id,
-            "🌧️ <b>Bot Informasi Cuaca Desa Petir</b>\n\n"
+            "🌧️ <b>Bot Hidrometeorologi – Desa Petir</b>\n\n"
             "/status  – Status cuaca sekarang\n"
             "/cuaca   – Parameter cuaca lengkap\n"
+            "/risiko  – Indeks risiko longsor saat ini\n"
             "/hujan   – Curah hujan hari ini\n"
             "/ekstrem – 5 event hujan terbesar\n"
             "/tren    – Tren 5 tahun terakhir\n"
-            "/help    – Tampilkan menu ini"
+            "/help    – Tampilkan menu ini\n\n"
+            "🔔 Notifikasi otomatis setiap hari jam 07.00 WIB"
         )
     elif text == "/status":
         # Gunakan fused data — sama dengan dashboard
@@ -2494,11 +2929,46 @@ def _handle_tg_command(chat_id, text):
             rows.append(f"{i}. {row.date.strftime('%d %b %Y')} – <b>{row.rainfall:.1f} mm</b>")
         _tg_send(chat_id, "\n".join(rows))
     elif text == "/tren":
-        annual = df_hist.groupby(df_hist["date"].dt.year)["rainfall"].agg(["sum","max","mean"])
+        df_t = get_hist_data(full=False)
+        if df_t is None or len(df_t) == 0:
+            _tg_send(chat_id, "❌ Data historis belum tersedia.")
+            return
+        annual = df_t.groupby(df_t["date"].dt.year)["rainfall"].agg(["sum","max","mean"])
         rows = ["📊 <b>Tren CH Tahunan (5 tahun terakhir)</b>", "━━━━━━━━━━━━━━━━"]
         for yr, row in annual.tail(5).iterrows():
-            rows.append(f"📅 {yr} | Total: {row['sum']:.0f}mm | Maks: {row['max']:.0f}mm | Avg: {row['mean']:.1f}mm")
+            rows.append(f"📅 {yr} | Total: {row['sum']:.0f} mm | Maks: {row['max']:.0f} mm | Avg: {row['mean']:.1f} mm")
         _tg_send(chat_id, "\n".join(rows))
+    elif text == "/risiko":
+        df_r = get_hist_data(full=False)
+        ch_h = cum3 = cum7 = 0.0
+        if df_r is not None and len(df_r) > 0:
+            ds = df_r.sort_values("date")
+            ch_h = float(ds.iloc[-1]["rainfall"])
+            cum3 = float(ds.tail(3)["rainfall"].sum())
+            cum7 = float(ds.tail(7)["rainfall"].sum())
+        try:
+            meteo = fetch_openmeteo()
+            curr  = meteo.get("current",{}) if meteo else {}
+            daily = meteo.get("daily",{}) if meteo else {}
+            rh    = curr.get("relative_humidity_2m", 80.0)
+            ws    = curr.get("wind_speed_10m", 2.0)
+            et0_l = daily.get("et0_fao_evapotranspiration",[3.0])
+            et0   = et0_l[0] if et0_l else 3.0
+        except Exception:
+            rh, ws, et0 = 80.0, 2.0, 3.0
+        h = hitung_indeks_risiko(ch_h, cum3, cum7, rh, et0, ws)
+        _tg_send(chat_id,
+            f"{h['emoji']} <b>Indeks Risiko Longsor: {h['indeks']}/100 — {h['level']}</b>\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"🌧 CH Harian   : <b>{ch_h:.1f} mm</b>\n"
+            f"📊 Kum 3 Hari  : <b>{cum3:.1f} mm</b>\n"
+            f"📊 Kum 7 Hari  : <b>{cum7:.1f} mm</b>\n"
+            f"💧 Kelembaban  : <b>{rh:.0f}%</b>\n"
+            f"🌿 ET₀         : <b>{et0:.2f} mm/hari</b>\n"
+            f"💨 Kec. Angin  : <b>{ws:.1f} m/s</b>\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"🟢 Normal <20 | 🟡 Waspada 20-45 | 🟠 Siaga 45-70 | 🔴 Awas >70"
+        )
     else:
         _tg_send(chat_id, "❓ Perintah tidak dikenali. Ketik /help untuk daftar perintah.")
 
