@@ -154,10 +154,10 @@ def load_desa_geojson():
 
 def load_slope_geojson():
     try:
-        with open("slope_petir.json", "r", encoding="utf-8") as f:
+        with open("slope_dramaga.json", "r", encoding="utf-8") as f:
             return _json.load(f)
     except Exception as e:
-        print(f"⚠️  slope_petir.json tidak ditemukan: {e}")
+        print(f"⚠️  slope_dramaga.json tidak ditemukan: {e}")
         return None
 
 DESA_GEOJSON  = load_desa_geojson()   # File lokal kecil — OK di startup
@@ -2706,10 +2706,10 @@ def update_risiko_display(data):
             "bgcolor": "#0f172a",
             "borderwidth": 0,
             "steps": [
-                {"range": [0,  20], "color": "rgba(34, 197, 94, 0.13)"},
-                {"range": [20, 45], "color": "rgba(234, 179, 8, 0.13)"},
-                {"range": [45, 70], "color": "rgba(249, 115, 22, 0.13)"},
-                {"range": [70,100], "color": "rgba(239, 68, 68, 0.13)"},
+                {"range": [0,  20], "color": "rgba(34,197,94,0.13)"},
+                {"range": [20, 45], "color": "rgba(234,179,8,0.13)"},
+                {"range": [45, 70], "color": "rgba(249,115,22,0.13)"},
+                {"range": [70,100], "color": "rgba(239,68,68,0.13)"},
             ],
             "threshold": {
                 "line": {"color": warna, "width": 3},
@@ -2718,7 +2718,11 @@ def update_risiko_display(data):
         },
         domain={"x": [0, 1], "y": [0, 1]},
     ))
-
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=20, r=20, t=30, b=10),
+        font=dict(color="#94a3b8"),
+    )
 
     # ── Badge level ────────────────────────────────────────────────────────
     badge = html.Div([
