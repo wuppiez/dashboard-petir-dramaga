@@ -716,7 +716,7 @@ app.layout = html.Div([
     dcc.Store(id="store-micromet"),
     dcc.Interval(id="interval-micromet", interval=3_600_000, n_intervals=0),  # 1 jam
     dcc.Store(id="store-risiko"),
-    dcc.Interval(id="interval-risiko", interval=1_800_000, n_intervals=0),  # 30 menit
+    dcc.Interval(id="interval-risiko", interval=300_000, n_intervals=0),   # 5 menit
     dcc.Store(id="store-notif-harian", data={"last_sent": ""}),
     dcc.Interval(id="interval-notif-harian", interval=60_000, n_intervals=0),  # tiap menit
     dcc.Interval(id="interval-realtime", interval=30_000, n_intervals=0),  # 30 detik
@@ -2575,6 +2575,91 @@ def handle_telegram_buttons(n_send, n_test, msg_text):
                          style={"color":"#ef4444","fontWeight":"600"})
     return ""
 
+# ─── FUNGSI BERSAMA: DATA INPUT INDEKS RISIKO ────────────────────────────────
+def get_risiko_inputs():
+    """
+    Ambil semua input hitung_indeks_risiko dari sumber real-time.
+    Dipakai BERSAMA oleh dashboard callback DAN Telegram /risiko.
+    Sumber CH: Open-Meteo daily > OpenWeatherMap > Open-Meteo current
+    Sumber kumulatif: CHIRPS + Open-Meteo hybrid (jika CHIRPS < 14 hari)
+    """
+    try:
+        meteo_data = fetch_openmeteo()
+    except Exception:
+        meteo_data = {}
+
+    curr  = meteo_data.get("current", {}) if meteo_data else {}
+    daily = meteo_data.get("daily",   {}) if meteo_data else {}
+
+    rh    = float(curr.get("relative_humidity_2m") or 80.0)
+    ws    = float(curr.get("wind_speed_10m")        or 2.0)
+    et0_l = daily.get("et0_fao_evapotranspiration", [])
+    et0   = float(et0_l[0]) if et0_l else 3.0
+
+    # CH Harian: prioritas Open-Meteo daily > OWM > OM current
+    prec_arr    = daily.get("precipitation_sum", [])
+    ch_om_today = float(prec_arr[-1] or 0) if prec_arr else 0.0
+    ch_om_now   = float(curr.get("precipitation") or 0)
+    ch_owm = 0.0
+    try:
+        owm    = fetch_weather()
+        ch_owm = float((owm.get("rain") or {}).get("1h", 0) or 0)
+    except Exception:
+        pass
+
+    if ch_om_today > 0:
+        ch_h, ch_src = ch_om_today, "Open-Meteo (daily)"
+    elif ch_owm > 0:
+        ch_h, ch_src = ch_owm,     "OpenWeatherMap"
+    elif ch_om_now > 0:
+        ch_h, ch_src = ch_om_now,  "Open-Meteo (now)"
+    else:
+        ch_h, ch_src = 0.0,        "–"
+
+    # Kumulatif dari Open-Meteo (past_days=7 sudah diset di URL)
+    # prec_arr: [H-7, H-6, H-5, H-4, H-3, H-2, H-1, H0, H+1, ...]
+    # 7 hari historis + hari ini + forecast → ambil 8 item terakhir dari historis
+    cum3_om = sum(float(x or 0) for x in prec_arr[:3]) if len(prec_arr) >= 3 else ch_h * 3
+    cum7_om = sum(float(x or 0) for x in prec_arr[:8]) if len(prec_arr) >= 7 else ch_h * 7
+
+    # Hybrid CHIRPS + Open-Meteo
+    df = get_hist_data(full=False)
+    chirps_last_date = None
+    cum3_ch = cum7_ch = 0.0
+    chirps_age_days = 999
+
+    if df is not None and len(df) > 0:
+        df_s = df.sort_values("date")
+        chirps_last_date = df_s.iloc[-1]["date"]
+        cum3_ch = float(df_s.tail(3)["rainfall"].sum())
+        cum7_ch = float(df_s.tail(7)["rainfall"].sum())
+        try:
+            from datetime import date as _dc
+            last_d = chirps_last_date.date() if hasattr(chirps_last_date, "date")                      else _dc.fromisoformat(str(chirps_last_date)[:10])
+            chirps_age_days = (now_wib().date() - last_d).days
+        except Exception:
+            pass
+
+    if chirps_age_days <= 14:
+        gap3 = min(chirps_age_days, 3)
+        gap7 = min(chirps_age_days, 7)
+        cum3 = cum3_ch + sum(float((prec_arr or [0])[i] or 0)
+                             for i in range(min(gap3, len(prec_arr))))
+        cum7 = cum7_ch + sum(float((prec_arr or [0])[i] or 0)
+                             for i in range(min(gap7, len(prec_arr))))
+        cum_src = f"CHIRPS+OM ({chirps_age_days}h gap)"
+    else:
+        cum3, cum7 = cum3_om, cum7_om
+        cum_src    = "Open-Meteo (CHIRPS lag)"
+
+    return {
+        "ch_h": ch_h,  "cum3": cum3,  "cum7": cum7,
+        "rh":   rh,    "et0":  et0,   "ws":   ws,
+        "ch_src": ch_src,  "cum_src": cum_src,
+        "chirps_date":      str(chirps_last_date)[:10] if chirps_last_date else "–",
+        "chirps_age_days":  chirps_age_days,
+    }
+
 # ─── CALLBACK: HITUNG INDEKS RISIKO ──────────────────────────────────────────
 @app.callback(
     Output("store-risiko", "data"),
@@ -2583,140 +2668,30 @@ def handle_telegram_buttons(n_send, n_test, msg_text):
      Input("store-fused",      "data")],
 )
 def update_risiko_store(_, meteo_data, fused_data):
-    """Hitung indeks risiko dari data real-time + CHIRPS terbaru."""
+    """Hitung indeks risiko — pakai get_risiko_inputs() agar konsisten dengan bot."""
     try:
-        # Ambil data meteorologi dari Open-Meteo (RH, ET0, WS)
-        if not meteo_data:
-            try:
-                meteo_data = fetch_openmeteo()
-            except Exception:
-                meteo_data = {}
-        curr  = meteo_data.get("current", {}) if meteo_data else {}
-        daily = meteo_data.get("daily",   {}) if meteo_data else {}
+        # Gunakan fungsi bersama agar dashboard dan Telegram bot pakai data sama
+        d = get_risiko_inputs()
+        ch_h = d["ch_h"]; cum3 = d["cum3"]; cum7 = d["cum7"]
+        rh   = d["rh"];   et0  = d["et0"];  ws   = d["ws"]
 
-        rh    = curr.get("relative_humidity_2m", None)
-        ws    = curr.get("wind_speed_10m",        None)
-        et0_l = daily.get("et0_fao_evapotranspiration", [])
-        et0   = et0_l[0] if et0_l else None
+        # Fallback meteo dari fused jika Open-Meteo gagal
+        if rh == 80.0 and fused_data:
+            rh = float(fused_data.get("humidity") or 80.0)
+        if ws == 2.0 and fused_data:
+            ws = float(fused_data.get("wind") or 2.0)
 
-        # Fallback ke data fused jika Open-Meteo tidak tersedia
-        if rh is None and fused_data:
-            rh = fused_data.get("humidity", 80.0)
-        if ws is None and fused_data:
-            ws = fused_data.get("wind", 2.0)
-        rh  = rh  if rh  is not None else 80.0
-        ws  = ws  if ws  is not None else 2.0
-        et0 = et0 if et0 is not None else 3.0
-
-        # ── CH Harian: Open-Meteo (real-time) + OWM fallback ────────────────
-        # Open-Meteo: precipitation hari ini dari hourly → sum
-        ch_om_today = 0.0
-        try:
-            # Ambil dari daily precipitation_sum hari ini (index 0)
-            om_daily_prec = daily.get("precipitation_sum", [])
-            if om_daily_prec:
-                ch_om_today = float(om_daily_prec[0] or 0)
-        except Exception:
-            pass
-
-        # Open-Meteo: current precipitation (mm/jam saat ini)
-        ch_om_now = float(curr.get("precipitation", 0) or 0)
-
-        # OWM: rain.1h (mm/jam dari stasiun)
-        ch_owm = 0.0
-        try:
-            if fused_data:
-                bd = fused_data.get("breakdown", {})
-                rain_bd = bd.get("rain", {})
-                ch_owm = float(rain_bd.get("OpenWeather", 0) or 0)
-        except Exception:
-            pass
-
-        # Pilih nilai CH harian terbaik
-        # Prioritas: Open-Meteo daily sum > OWM > Open-Meteo current
-        if ch_om_today > 0:
-            ch_h    = ch_om_today
-            ch_src  = "Open-Meteo (daily)"
-        elif ch_owm > 0:
-            ch_h    = ch_owm
-            ch_src  = "OpenWeatherMap"
-        elif ch_om_now > 0:
-            ch_h    = ch_om_now
-            ch_src  = "Open-Meteo (current)"
-        else:
-            ch_h    = 0.0
-            ch_src  = "–"
-
-        # ── Kumulatif 3 & 7 Hari: Open-Meteo daily sum ────────────────────
-        # Open-Meteo menyediakan 7 hari ke depan TAPI juga data historis
-        # via past_days parameter — kita pakai precipitation_sum array
-        # Index 0 = hari ini, tapi dengan past_days array bisa lebih banyak
-        cum3_om = 0.0
-        cum7_om = 0.0
-        try:
-            prec_arr = daily.get("precipitation_sum", [])
-            # Ambil sebanyak tersedia (Open-Meteo standar = 7 hari ke depan)
-            # Untuk kumulatif historis, kita pakai CHIRPS sebagai base
-            if len(prec_arr) >= 1:
-                cum3_om = sum(float(x or 0) for x in prec_arr[:3])
-                cum7_om = sum(float(x or 0) for x in prec_arr[:7])
-        except Exception:
-            pass
-
-        # Gabungkan: CHIRPS historis + Open-Meteo hari-hari yang belum ada di CHIRPS
-        df = get_hist_data(full=False)
-        ch_chirps_last = 0.0
-        cum3_chirps    = 0.0
-        cum7_chirps    = 0.0
-        chirps_last_date = None
-
-        if df is not None and len(df) > 0:
-            df_s = df.sort_values("date")
-            chirps_last_date = df_s.iloc[-1]["date"]
-            ch_chirps_last   = float(df_s.iloc[-1]["rainfall"])
-            cum3_chirps      = float(df_s.tail(3)["rainfall"].sum())
-            cum7_chirps      = float(df_s.tail(7)["rainfall"].sum())
-
-        # Strategi kumulatif:
-        # Jika CHIRPS data < 7 hari yang lalu → pakai CHIRPS sebagai base historis
-        # lalu tambah CH dari Open-Meteo untuk hari-hari yang belum ada di CHIRPS
-        from datetime import date as _date_cls
-        today = now_wib().date()
-        chirps_age_days = 999
-        if chirps_last_date is not None:
-            try:
-                last_d = chirps_last_date.date() if hasattr(chirps_last_date, 'date') else                          _date_cls.fromisoformat(str(chirps_last_date)[:10])
-                chirps_age_days = (today - last_d).days
-            except Exception:
-                pass
-
-        if chirps_age_days <= 7:
-            # CHIRPS masih relatif baru — gabungkan
-            # CHIRPS punya data sampai N hari lalu, sisanya dari Open-Meteo
-            # cum3: CHIRPS base + Open-Meteo hari yang belum ada
-            gap = min(chirps_age_days, 3)  # berapa hari yang perlu diisi Open-Meteo
-            cum3 = cum3_chirps + sum(
-                float((daily.get("precipitation_sum") or [0])[i] or 0)
-                for i in range(min(gap, len(daily.get("precipitation_sum", []))))
-            )
-            gap7 = min(chirps_age_days, 7)
-            cum7 = cum7_chirps + sum(
-                float((daily.get("precipitation_sum") or [0])[i] or 0)
-                for i in range(min(gap7, len(daily.get("precipitation_sum", []))))
-            )
-            cum_src = f"CHIRPS + Open-Meteo ({chirps_age_days}hr gap)"
-        else:
-            # CHIRPS sangat lama (>7 hari) → full Open-Meteo
-            cum3 = cum3_om
-            cum7 = cum7_om
-            cum_src = "Open-Meteo (CHIRPS lag)"
+        ch_src      = d["ch_src"]
+        cum_src     = d["cum_src"]
+        chirps_age  = d["chirps_age_days"]
+        chirps_date = d["chirps_date"]
 
         hasil = hitung_indeks_risiko(ch_h, cum3, cum7, rh, et0, ws)
         hasil["updated_at"]  = now_wib().strftime("%d %b %Y %H:%M WIB")
         hasil["ch_src"]      = ch_src
         hasil["cum_src"]     = cum_src
-        hasil["chirps_age"]  = chirps_age_days
-        hasil["chirps_date"] = str(chirps_last_date)[:10] if chirps_last_date else "–"
+        hasil["chirps_age"]  = chirps_age
+        hasil["chirps_date"] = chirps_date
 
         # Kirim Telegram jika AWAS (throttle: max 1x per 3 jam)
         if hasil["level"] == "AWAS":
@@ -3165,36 +3140,28 @@ def _handle_tg_command(chat_id, text):
             rows.append(f"📅 {yr} | Total: {row['sum']:.0f} mm | Maks: {row['max']:.0f} mm | Avg: {row['mean']:.1f} mm")
         _tg_send(chat_id, "\n".join(rows))
     elif text == "/risiko":
-        df_r = get_hist_data(full=False)
-        ch_h = cum3 = cum7 = 0.0
-        if df_r is not None and len(df_r) > 0:
-            ds = df_r.sort_values("date")
-            ch_h = float(ds.iloc[-1]["rainfall"])
-            cum3 = float(ds.tail(3)["rainfall"].sum())
-            cum7 = float(ds.tail(7)["rainfall"].sum())
         try:
-            meteo = fetch_openmeteo()
-            curr  = meteo.get("current",{}) if meteo else {}
-            daily = meteo.get("daily",{}) if meteo else {}
-            rh    = curr.get("relative_humidity_2m", 80.0)
-            ws    = curr.get("wind_speed_10m", 2.0)
-            et0_l = daily.get("et0_fao_evapotranspiration",[3.0])
-            et0   = et0_l[0] if et0_l else 3.0
-        except Exception:
-            rh, ws, et0 = 80.0, 2.0, 3.0
-        h = hitung_indeks_risiko(ch_h, cum3, cum7, rh, et0, ws)
-        _tg_send(chat_id,
-            f"{h['emoji']} <b>Indeks Risiko Longsor: {h['indeks']}/100 — {h['level']}</b>\n"
-            f"━━━━━━━━━━━━━━━━\n"
-            f"🌧 CH Harian   : <b>{ch_h:.1f} mm</b>\n"
-            f"📊 Kum 3 Hari  : <b>{cum3:.1f} mm</b>\n"
-            f"📊 Kum 7 Hari  : <b>{cum7:.1f} mm</b>\n"
-            f"💧 Kelembaban  : <b>{rh:.0f}%</b>\n"
-            f"🌿 ET₀         : <b>{et0:.2f} mm/hari</b>\n"
-            f"💨 Kec. Angin  : <b>{ws:.1f} m/s</b>\n"
-            f"━━━━━━━━━━━━━━━━\n"
-            f"🟢 Normal &lt;20 | 🟡 Waspada 20–45 | 🟠 Siaga 45–70 | 🔴 Awas &gt;70"
-        )
+            # Pakai fungsi bersama — data IDENTIK dengan dashboard
+            d = get_risiko_inputs()
+            h = hitung_indeks_risiko(
+                d["ch_h"], d["cum3"], d["cum7"],
+                d["rh"],   d["et0"],  d["ws"]
+            )
+            _tg_send(chat_id,
+                f"{h['emoji']} <b>Indeks Risiko Longsor: {h['indeks']}/100 — {h['level']}</b>\n"
+                f"━━━━━━━━━━━━━━━━\n"
+                f"🌧 CH Harian   : <b>{d['ch_h']:.1f} mm</b> [{d['ch_src']}]\n"
+                f"📊 Kum 3 Hari  : <b>{d['cum3']:.1f} mm</b>\n"
+                f"📊 Kum 7 Hari  : <b>{d['cum7']:.1f} mm</b> [{d['cum_src']}]\n"
+                f"💧 Kelembaban  : <b>{d['rh']:.0f}%</b>\n"
+                f"🌿 ET₀         : <b>{d['et0']:.2f} mm/hari</b>\n"
+                f"💨 Kec. Angin  : <b>{d['ws']:.1f} m/s</b>\n"
+                f"━━━━━━━━━━━━━━━━\n"
+                f"🛰 CHIRPS: {d['chirps_date']} ({d['chirps_age_days']} hari lalu)\n"
+                f"🟢 Normal &lt;20 | 🟡 Waspada 20–45 | 🟠 Siaga 45–70 | 🔴 Awas &gt;70"
+            )
+        except Exception as e:
+            _tg_send(chat_id, f"❌ Gagal menghitung indeks risiko: {e}")
     else:
         _tg_send(chat_id, "❓ Perintah tidak dikenali. Ketik /help untuk daftar perintah.")
 
