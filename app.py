@@ -2695,7 +2695,7 @@ def update_risiko_display(data):
     upd    = data.get("updated_at", "-")
 
     # ── Gauge meter ────────────────────────────────────────────────────────
-    fig = go.Figure(go.Indicator(
+      fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=indeks,
         number={"suffix": "/100", "font": {"size": 28, "color": warna}},
@@ -2706,10 +2706,10 @@ def update_risiko_display(data):
             "bgcolor": "#0f172a",
             "borderwidth": 0,
             "steps": [
-                {"range": [0,  20], "color": "#22c55e22"},
-                {"range": [20, 45], "color": "#eab30822"},
-                {"range": [45, 70], "color": "#f9731622"},
-                {"range": [70,100], "color": "#ef444422"},
+                {"range": [0,  20], "color": "rgba(34, 197, 94, 0.13)"},
+                {"range": [20, 45], "color": "rgba(234, 179, 8, 0.13)"},
+                {"range": [45, 70], "color": "rgba(249, 115, 22, 0.13)"},
+                {"range": [70,100], "color": "rgba(239, 68, 68, 0.13)"},
             ],
             "threshold": {
                 "line": {"color": warna, "width": 3},
