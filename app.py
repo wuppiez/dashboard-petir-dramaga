@@ -3072,7 +3072,7 @@ def _handle_tg_command(chat_id, text):
             f"🌿 ET₀         : <b>{et0:.2f} mm/hari</b>\n"
             f"💨 Kec. Angin  : <b>{ws:.1f} m/s</b>\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"🟢 Normal <20 | 🟡 Waspada 20-45 | 🟠 Siaga 45-70 | 🔴 Awas >70"
+            f"🟢 Normal &lt;20 | 🟡 Waspada 20-45 | 🟠 Siaga 45-70 | 🔴 Awas &gt;70"
         )
     else:
         _tg_send(chat_id, "❓ Perintah tidak dikenali. Ketik /help untuk daftar perintah.")
