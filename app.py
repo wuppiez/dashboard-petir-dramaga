@@ -334,7 +334,7 @@ def fetch_openmeteo():
         f"soil_moisture_0_to_1cm,soil_moisture_1_to_3cm,soil_moisture_3_to_9cm"
         f"&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,"
         f"uv_index_max,wind_speed_10m_max,et0_fao_evapotranspiration"
-        f"&timezone=Asia%2FJakarta&forecast_days=7"
+        f"&timezone=Asia%2FJakarta&forecast_days=7&past_days=7"
     )
     for attempt in range(3):  # Retry 3x
         try:
@@ -2608,19 +2608,115 @@ def update_risiko_store(_, meteo_data, fused_data):
         ws  = ws  if ws  is not None else 2.0
         et0 = et0 if et0 is not None else 3.0
 
-        # Ambil CH terbaru dari cache CHIRPS
+        # ── CH Harian: Open-Meteo (real-time) + OWM fallback ────────────────
+        # Open-Meteo: precipitation hari ini dari hourly → sum
+        ch_om_today = 0.0
+        try:
+            # Ambil dari daily precipitation_sum hari ini (index 0)
+            om_daily_prec = daily.get("precipitation_sum", [])
+            if om_daily_prec:
+                ch_om_today = float(om_daily_prec[0] or 0)
+        except Exception:
+            pass
+
+        # Open-Meteo: current precipitation (mm/jam saat ini)
+        ch_om_now = float(curr.get("precipitation", 0) or 0)
+
+        # OWM: rain.1h (mm/jam dari stasiun)
+        ch_owm = 0.0
+        try:
+            if fused_data:
+                bd = fused_data.get("breakdown", {})
+                rain_bd = bd.get("rain", {})
+                ch_owm = float(rain_bd.get("OpenWeather", 0) or 0)
+        except Exception:
+            pass
+
+        # Pilih nilai CH harian terbaik
+        # Prioritas: Open-Meteo daily sum > OWM > Open-Meteo current
+        if ch_om_today > 0:
+            ch_h    = ch_om_today
+            ch_src  = "Open-Meteo (daily)"
+        elif ch_owm > 0:
+            ch_h    = ch_owm
+            ch_src  = "OpenWeatherMap"
+        elif ch_om_now > 0:
+            ch_h    = ch_om_now
+            ch_src  = "Open-Meteo (current)"
+        else:
+            ch_h    = 0.0
+            ch_src  = "–"
+
+        # ── Kumulatif 3 & 7 Hari: Open-Meteo daily sum ────────────────────
+        # Open-Meteo menyediakan 7 hari ke depan TAPI juga data historis
+        # via past_days parameter — kita pakai precipitation_sum array
+        # Index 0 = hari ini, tapi dengan past_days array bisa lebih banyak
+        cum3_om = 0.0
+        cum7_om = 0.0
+        try:
+            prec_arr = daily.get("precipitation_sum", [])
+            # Ambil sebanyak tersedia (Open-Meteo standar = 7 hari ke depan)
+            # Untuk kumulatif historis, kita pakai CHIRPS sebagai base
+            if len(prec_arr) >= 1:
+                cum3_om = sum(float(x or 0) for x in prec_arr[:3])
+                cum7_om = sum(float(x or 0) for x in prec_arr[:7])
+        except Exception:
+            pass
+
+        # Gabungkan: CHIRPS historis + Open-Meteo hari-hari yang belum ada di CHIRPS
         df = get_hist_data(full=False)
-        ch_h, cum3, cum7 = 0.0, 0.0, 0.0
+        ch_chirps_last = 0.0
+        cum3_chirps    = 0.0
+        cum7_chirps    = 0.0
+        chirps_last_date = None
+
         if df is not None and len(df) > 0:
-            df_s  = df.sort_values("date")
-            last7 = df_s.tail(7)
-            last3 = df_s.tail(3)
-            ch_h  = float(df_s.iloc[-1]["rainfall"])
-            cum3  = float(last3["rainfall"].sum())
-            cum7  = float(last7["rainfall"].sum())
+            df_s = df.sort_values("date")
+            chirps_last_date = df_s.iloc[-1]["date"]
+            ch_chirps_last   = float(df_s.iloc[-1]["rainfall"])
+            cum3_chirps      = float(df_s.tail(3)["rainfall"].sum())
+            cum7_chirps      = float(df_s.tail(7)["rainfall"].sum())
+
+        # Strategi kumulatif:
+        # Jika CHIRPS data < 7 hari yang lalu → pakai CHIRPS sebagai base historis
+        # lalu tambah CH dari Open-Meteo untuk hari-hari yang belum ada di CHIRPS
+        from datetime import date as _date_cls
+        today = now_wib().date()
+        chirps_age_days = 999
+        if chirps_last_date is not None:
+            try:
+                last_d = chirps_last_date.date() if hasattr(chirps_last_date, 'date') else                          _date_cls.fromisoformat(str(chirps_last_date)[:10])
+                chirps_age_days = (today - last_d).days
+            except Exception:
+                pass
+
+        if chirps_age_days <= 7:
+            # CHIRPS masih relatif baru — gabungkan
+            # CHIRPS punya data sampai N hari lalu, sisanya dari Open-Meteo
+            # cum3: CHIRPS base + Open-Meteo hari yang belum ada
+            gap = min(chirps_age_days, 3)  # berapa hari yang perlu diisi Open-Meteo
+            cum3 = cum3_chirps + sum(
+                float((daily.get("precipitation_sum") or [0])[i] or 0)
+                for i in range(min(gap, len(daily.get("precipitation_sum", []))))
+            )
+            gap7 = min(chirps_age_days, 7)
+            cum7 = cum7_chirps + sum(
+                float((daily.get("precipitation_sum") or [0])[i] or 0)
+                for i in range(min(gap7, len(daily.get("precipitation_sum", []))))
+            )
+            cum_src = f"CHIRPS + Open-Meteo ({chirps_age_days}hr gap)"
+        else:
+            # CHIRPS sangat lama (>7 hari) → full Open-Meteo
+            cum3 = cum3_om
+            cum7 = cum7_om
+            cum_src = "Open-Meteo (CHIRPS lag)"
 
         hasil = hitung_indeks_risiko(ch_h, cum3, cum7, rh, et0, ws)
-        hasil["updated_at"] = now_wib().strftime("%d %b %Y %H:%M WIB")
+        hasil["updated_at"]  = now_wib().strftime("%d %b %Y %H:%M WIB")
+        hasil["ch_src"]      = ch_src
+        hasil["cum_src"]     = cum_src
+        hasil["chirps_age"]  = chirps_age_days
+        hasil["chirps_date"] = str(chirps_last_date)[:10] if chirps_last_date else "–"
 
         # Kirim Telegram jika AWAS (throttle: max 1x per 3 jam)
         if hasil["level"] == "AWAS":
@@ -2791,8 +2887,33 @@ def update_risiko_display(data):
         ]),
     ])
 
-    updated_text = html.Span(f"⏱ Update: {upd} | interval 30 menit",
-                             style={"fontSize":"10px","color":"#475569"})
+    # Info sumber data
+    ch_src      = data.get("ch_src",     "–")
+    cum_src     = data.get("cum_src",    "–")
+    chirps_date = data.get("chirps_date","–")
+    chirps_age  = data.get("chirps_age", 999)
+
+    age_color = "#22c55e" if chirps_age <= 3 else "#eab308" if chirps_age <= 14 else "#ef4444"
+    age_label = f"{chirps_age} hari lalu" if chirps_age < 999 else "–"
+
+    updated_text = html.Div([
+        html.Div([
+            html.Span("⏱ Update: ", style={"fontSize":"9px","color":"#475569"}),
+            html.Span(upd, style={"fontSize":"9px","color":"#64748b"}),
+            html.Span(" | interval 30 menit", style={"fontSize":"9px","color":"#334155"}),
+        ]),
+        html.Div([
+            html.Span("🌧 CH Harian: ", style={"fontSize":"9px","color":"#475569"}),
+            html.Span(ch_src, style={"fontSize":"9px","color":"#38bdf8","fontWeight":"600"}),
+            html.Span("  |  📊 Kumulatif: ", style={"fontSize":"9px","color":"#475569"}),
+            html.Span(cum_src, style={"fontSize":"9px","color":"#38bdf8","fontWeight":"600"}),
+        ]),
+        html.Div([
+            html.Span("🛰 CHIRPS terakhir: ", style={"fontSize":"9px","color":"#475569"}),
+            html.Span(chirps_date, style={"fontSize":"9px","color":age_color,"fontWeight":"600"}),
+            html.Span(f" ({age_label})", style={"fontSize":"9px","color":age_color}),
+        ]),
+    ])
     return fig, badge, bars, params_div, updated_text
 
 # ─── CALLBACK: NOTIFIKASI TELEGRAM HARIAN OTOMATIS ───────────────────────────
@@ -3072,7 +3193,7 @@ def _handle_tg_command(chat_id, text):
             f"🌿 ET₀         : <b>{et0:.2f} mm/hari</b>\n"
             f"💨 Kec. Angin  : <b>{ws:.1f} m/s</b>\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"🟢 Normal &lt;20 | 🟡 Waspada 20-45 | 🟠 Siaga 45-70 | 🔴 Awas &gt;70"
+            f"🟢 Normal &lt;20 | 🟡 Waspada 20–45 | 🟠 Siaga 45–70 | 🔴 Awas &gt;70"
         )
     else:
         _tg_send(chat_id, "❓ Perintah tidak dikenali. Ketik /help untuk daftar perintah.")
