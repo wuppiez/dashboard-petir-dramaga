@@ -154,10 +154,10 @@ def load_desa_geojson():
 
 def load_slope_geojson():
     try:
-        with open("slope_dramaga.json", "r", encoding="utf-8") as f:
+        with open("slope_petir.json", "r", encoding="utf-8") as f:
             return _json.load(f)
     except Exception as e:
-        print(f"⚠️  slope_dramaga.json tidak ditemukan: {e}")
+        print(f"⚠️  slope_petir.json tidak ditemukan: {e}")
         return None
 
 DESA_GEOJSON  = load_desa_geojson()   # File lokal kecil — OK di startup
