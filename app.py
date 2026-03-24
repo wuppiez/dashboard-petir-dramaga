@@ -154,10 +154,10 @@ def load_desa_geojson():
 
 def load_slope_geojson():
     try:
-        with open("slope_petir.json", "r", encoding="utf-8") as f:
+        with open("slope_dramaga.json", "r", encoding="utf-8") as f:
             return _json.load(f)
     except Exception as e:
-        print(f"⚠️  slope_petir.json tidak ditemukan: {e}")
+        print(f"⚠️  slope_dramaga.json tidak ditemukan: {e}")
         return None
 
 DESA_GEOJSON  = load_desa_geojson()   # File lokal kecil — OK di startup
@@ -2272,50 +2272,191 @@ def update_micromet_chart(param, year_range):
 
     return fig
 
-# ─── CALLBACK: STATISTIK MICROMET ─────────────────────────────────────────────
+# ─── CALLBACK: STATISTIK MICROMET (DINAMIS) ───────────────────────────────────
 @app.callback(
     Output("micromet-stat-cards", "children"),
-    Input("store-micromet", "data"),
+    [Input("store-micromet",      "data"),
+     Input("micromet-param",      "value"),
+     Input("micromet-year-range", "value")],
 )
-def update_micromet_stats(data):
-    df_micromet = get_micromet_data()
-    if not MICROMET_AVAILABLE or df_micromet is None or len(df_micromet) == 0:
+def update_micromet_stats(data, param, year_range):
+    """Metric cards dinamis mengikuti parameter dan rentang tahun yang dipilih."""
+    df_full = get_micromet_data()
+    if not MICROMET_AVAILABLE or df_full is None or len(df_full) == 0:
         return [html.Div(
-            "⚠️ Data NASA POWER belum tersedia. Jalankan nasa_power_update.py --historical",
+            "⚠️ Data NASA POWER belum tersedia.",
             style={"color": "#f59e0b", "fontSize": "12px", "padding": "10px",
                    "background": "#1e293b", "borderRadius": "8px"}
         )]
 
-    stats_data = [
-        ("🌡️ Suhu Rata-rata",  f"{df_micromet['t2m'].mean():.1f}°C",     "#ef4444"),
-        ("💧 Kelembaban Rata", f"{df_micromet['rh2m'].mean():.1f}%",      "#38bdf8"),
-        ("💨 Angin Rata-rata", f"{df_micromet['ws2m'].mean():.1f} m/s",   "#8b5cf6"),
-        ("☀️ Radiasi Rata",    f"{df_micromet['radiation'].mean():.1f} MJ",  "#eab308"),
-        ("🌿 ET0 Rata-rata",   f"{df_micromet['et0'].mean():.1f} mm/hr",  "#10b981"),
-        ("📅 Rentang Data",
-         f"{df_micromet['date'].min().year}–{df_micromet['date'].max().year}",
-         "#06b6d4"),
-    ]
+    # Filter tahun sesuai slider
+    df = df_full[
+        (df_full["year"] >= year_range[0]) &
+        (df_full["year"] <= year_range[1])
+    ].copy()
 
-    cards = []
-    for label, value, color in stats_data:
-        cards.append(html.Div([
-            html.Div(label, style={"fontSize": "11px", "color": "#94a3b8",
-                                   "textTransform": "uppercase"}),
-            html.Div(value, style={"fontSize": "18px", "fontWeight": "700",
-                                   "color": "#f1f5f9", "marginTop": "4px"}),
-            html.Div("© NASA POWER", style={"fontSize": "9px", "color": "#475569",
-                                            "marginTop": "4px"}),
+    if len(df) == 0:
+        return [html.Div("Tidak ada data untuk rentang tahun ini.",
+                         style={"color": "#94a3b8", "fontSize": "12px"})]
+
+    yr_label = f"{year_range[0]}–{year_range[1]}"
+    n_days   = len(df)
+
+    def card(icon, label, value, unit, color, sub=None):
+        return html.Div([
+            html.Div(f"{icon} {label}",
+                     style={"fontSize": "10px", "color": "#94a3b8",
+                            "textTransform": "uppercase", "marginBottom": "4px"}),
+            html.Div([
+                html.Span(value, style={"fontSize": "20px", "fontWeight": "800",
+                                        "color": "#f1f5f9"}),
+                html.Span(f" {unit}", style={"fontSize": "11px", "color": "#64748b",
+                                             "marginLeft": "3px"}),
+            ]),
+            html.Div(sub or f"© NASA POWER · {yr_label}",
+                     style={"fontSize": "9px", "color": "#475569", "marginTop": "4px"}),
         ], style={
-            "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-            "border":      f"1px solid {color}44",
+            "background":   "linear-gradient(135deg, #1e293b, #0f172a)",
+            "border":       f"1px solid {color}44",
             "borderRadius": "10px",
-            "padding":     "14px 18px",
-            "flex":        "1",
-            "minWidth":    "130px",
-            "boxShadow":   f"0 2px 12px {color}22",
-        }))
-    return cards
+            "padding":      "14px 18px",
+            "flex":         "1",
+            "minWidth":     "130px",
+            "boxShadow":    f"0 2px 12px {color}22",
+        })
+
+    # ── Statistik per parameter ──────────────────────────────────────────────
+    if param == "temp":
+        col = "t2m"
+        avg  = df[col].mean()
+        mx   = df["t2m_max"].max() if "t2m_max" in df else df[col].max()
+        mn   = df["t2m_min"].min() if "t2m_min" in df else df[col].min()
+        std  = df[col].std()
+        hot  = int((df["t2m_max"] >= 35).sum()) if "t2m_max" in df else 0
+        cool = int((df["t2m_min"] <= 20).sum()) if "t2m_min" in df else 0
+        return [
+            card("🌡️", "Suhu Rata-rata",   f"{avg:.1f}", "°C", "#ef4444"),
+            card("🔴", "Suhu Tertinggi",   f"{mx:.1f}",  "°C", "#ef4444", f"Maks absolut · {yr_label}"),
+            card("🔵", "Suhu Terendah",    f"{mn:.1f}",  "°C", "#38bdf8", f"Min absolut · {yr_label}"),
+            card("📊", "Std. Deviasi",     f"{std:.2f}", "°C", "#8b5cf6", "Variabilitas suhu harian"),
+            card("☀️", "Hari Panas ≥35°C", f"{hot:,}",   "hari","#f97316", f"dari {n_days:,} hari data"),
+            card("❄️", "Hari Sejuk ≤20°C", f"{cool:,}",  "hari","#06b6d4", f"dari {n_days:,} hari data"),
+        ]
+
+    elif param == "rh":
+        col  = "rh2m"
+        avg  = df[col].mean()
+        mx   = df[col].max()
+        mn   = df[col].min()
+        lembab = int((df[col] >= 85).sum())
+        kering = int((df[col] <  60).sum())
+        nyaman = int(((df[col] >= 60) & (df[col] <= 80)).sum())
+        return [
+            card("💧", "RH Rata-rata",     f"{avg:.1f}", "%",   "#38bdf8"),
+            card("🔝", "RH Tertinggi",     f"{mx:.1f}",  "%",   "#38bdf8", f"Maks absolut · {yr_label}"),
+            card("🔽", "RH Terendah",      f"{mn:.1f}",  "%",   "#eab308", f"Min absolut · {yr_label}"),
+            card("🌫️", "Hari Lembab ≥85%", f"{lembab:,}","hari","#06b6d4", f"dari {n_days:,} hari data"),
+            card("🏜️", "Hari Kering <60%", f"{kering:,}","hari","#f59e0b", f"dari {n_days:,} hari data"),
+            card("😊", "Hari Nyaman 60–80%",f"{nyaman:,}","hari","#22c55e", f"dari {n_days:,} hari data"),
+        ]
+
+    elif param == "wind":
+        col   = "ws2m"
+        avg   = df[col].mean()
+        mx    = df[col].max()
+        kenc  = int((df[col] >= 5).sum())
+        tenang= int((df[col] <  2).sum())
+        # Arah angin dominan
+        if "wd2m" in df.columns:
+            dirs  = ["U","TL","T","TG","S","BD","B","BL"]
+            dom_deg = df["wd2m"].mode()[0] if len(df) > 0 else 0
+            dom_dir = dirs[int((dom_deg + 22.5) / 45) % 8]
+            dom_val = f"{dom_deg:.0f}° ({dom_dir})"
+        else:
+            dom_val = "–"
+        return [
+            card("💨", "Kec. Rata-rata",   f"{avg:.1f}",  "m/s", "#8b5cf6"),
+            card("🌪️", "Kec. Tertinggi",   f"{mx:.1f}",   "m/s", "#ef4444", f"Maks absolut · {yr_label}"),
+            card("🧭", "Arah Dominan",     dom_val,        "",    "#38bdf8", f"Mode arah angin · {yr_label}"),
+            card("💨", "Hari Kencang ≥5",  f"{kenc:,}",   "hari","#f97316", f"dari {n_days:,} hari data"),
+            card("🍃", "Hari Tenang <2",   f"{tenang:,}", "hari","#22c55e", f"dari {n_days:,} hari data"),
+            card("📅", "Total Data",       f"{n_days:,}", "hari","#06b6d4", f"NASA POWER · {yr_label}"),
+        ]
+
+    elif param == "rad":
+        col  = "radiation"
+        avg  = df[col].mean()
+        mx   = df[col].max()
+        total= df[col].sum()
+        cerah= int((df[col] >= 20).sum())
+        mendung = int((df[col] < 10).sum())
+        return [
+            card("☀️", "Radiasi Rata-rata", f"{avg:.1f}",      "W/m²","#eab308"),
+            card("🌟", "Radiasi Tertinggi", f"{mx:.1f}",       "W/m²","#f97316", f"Maks absolut · {yr_label}"),
+            card("⚡", "Total Energi",      f"{total/1000:.0f}","kW/m²","#eab308",f"Akumulasi {yr_label}"),
+            card("☀️", "Hari Cerah ≥20",   f"{cerah:,}",      "hari","#f59e0b", f"dari {n_days:,} hari data"),
+            card("☁️", "Hari Mendung <10", f"{mendung:,}",    "hari","#64748b", f"dari {n_days:,} hari data"),
+            card("📅", "Total Data",       f"{n_days:,}",     "hari","#06b6d4", f"NASA POWER · {yr_label}"),
+        ]
+
+    elif param == "et0":
+        col  = "et0"
+        avg  = df[col].mean()
+        mx   = df[col].max()
+        mn   = df[col].min()
+        total= df[col].sum()
+        rendah = int((df[col] < 2).sum())
+        tinggi = int((df[col] >= 5).sum())
+        return [
+            card("🌿", "ET₀ Rata-rata",    f"{avg:.2f}",     "mm/hr","#10b981"),
+            card("🔝", "ET₀ Tertinggi",    f"{mx:.2f}",      "mm/hr","#f97316",f"Maks absolut · {yr_label}"),
+            card("🔽", "ET₀ Terendah",     f"{mn:.2f}",      "mm/hr","#38bdf8",f"Min absolut · {yr_label}"),
+            card("💧", "Total ET₀",        f"{total:.0f}",   "mm",  "#10b981",f"Akumulasi {yr_label}"),
+            card("⚠️", "Hari ET₀ Rendah",  f"{rendah:,}",   "hari","#eab308",f"ET₀ <2 mm · risiko jenuh"),
+            card("☀️", "Hari ET₀ Tinggi",  f"{tinggi:,}",   "hari","#22c55e",f"ET₀ ≥5 mm · hari aktif"),
+        ]
+
+    elif param == "pres":
+        col  = "pressure"
+        avg  = df[col].mean()
+        mx   = df[col].max()
+        mn   = df[col].min()
+        std  = df[col].std()
+        rendah = int((df[col] < 1005).sum())
+        return [
+            card("🔵", "Tekanan Rata-rata", f"{avg:.1f}",  "hPa","#6366f1"),
+            card("🔝", "Tekanan Tertinggi", f"{mx:.1f}",   "hPa","#6366f1",f"Maks absolut · {yr_label}"),
+            card("🔽", "Tekanan Terendah",  f"{mn:.1f}",   "hPa","#a78bfa",f"Min absolut · {yr_label}"),
+            card("📊", "Std. Deviasi",      f"{std:.2f}",  "hPa","#8b5cf6","Variabilitas tekanan"),
+            card("⚠️", "Hari Tekanan Rendah",f"{rendah:,}","hari","#f59e0b",f"<1005 hPa · {yr_label}"),
+            card("📅", "Total Data",        f"{n_days:,}", "hari","#06b6d4",f"NASA POWER · {yr_label}"),
+        ]
+
+    elif param == "prec":
+        col   = "prec_nasa" if "prec_nasa" in df.columns else "t2m"
+        if col == "prec_nasa":
+            avg   = df[col].mean()
+            total = df[col].sum()
+            mx    = df[col].max()
+            hujan = int((df[col] > 0.5).sum())
+            lebat = int((df[col] >= 20).sum())
+            kering= int((df[col] <= 0.5).sum())
+        else:
+            # Kolom tidak tersedia
+            return [html.Div("⚠️ Kolom prec_nasa tidak tersedia di data.",
+                             style={"color":"#f59e0b","fontSize":"12px"})]
+        return [
+            card("🌧️", "CH Rata-rata",    f"{avg:.2f}",  "mm",  "#06b6d4"),
+            card("💦", "Total CH",         f"{total:.0f}","mm",  "#06b6d4",f"Akumulasi {yr_label}"),
+            card("⛈️", "CH Tertinggi",    f"{mx:.1f}",   "mm",  "#ef4444",f"Maks harian · {yr_label}"),
+            card("🌧", "Hari Hujan >0.5", f"{hujan:,}",  "hari","#38bdf8",f"dari {n_days:,} hari data"),
+            card("⛈️", "Hari Lebat ≥20", f"{lebat:,}",  "hari","#f97316",f"dari {n_days:,} hari data"),
+            card("☀️", "Hari Kering",     f"{kering:,}", "hari","#eab308",f"dari {n_days:,} hari data"),
+        ]
+
+    # Fallback
+    return [html.Div("Pilih parameter dari dropdown.",
+                     style={"color":"#94a3b8","fontSize":"12px"})]
 
 # ─── CALLBACK: SUPABASE REALTIME TRIGGER ─────────────────────────────────────
 
