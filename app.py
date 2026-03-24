@@ -154,10 +154,10 @@ def load_desa_geojson():
 
 def load_slope_geojson():
     try:
-        with open("slope_dramaga.json", "r", encoding="utf-8") as f:
+        with open("slope_petir.json", "r", encoding="utf-8") as f:
             return _json.load(f)
     except Exception as e:
-        print(f"⚠️  slope_dramaga.json tidak ditemukan: {e}")
+        print(f"⚠️  slope_petir.json tidak ditemukan: {e}")
         return None
 
 DESA_GEOJSON  = load_desa_geojson()   # File lokal kecil — OK di startup
@@ -680,7 +680,7 @@ app = dash.Dash(
         "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css",
     ],
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
-    title="Dashboard Hidrometeorologi – Desa Petir",
+    title="Dashboard Informasi Cuaca – Desa Petir",
 )
 
 # ─── HELPER: CARD METRIC ───────────────────────────────────────────────────────
@@ -740,7 +740,7 @@ app.layout = html.Div([
             html.Div([
                 html.I(className="fa fa-cloud-rain", style={"fontSize": "32px", "color": "#38bdf8"}),
                 html.Div([
-                    html.H1("Dashboard Hidrometeorologi",
+                    html.H1("Dashboard Informasi Cuaca Desa",
                             style={"margin": "0", "fontSize": "22px", "fontWeight": "700", "color": "#f1f5f9"}),
                     html.P(f"📍 {LOCATION_NAME}",
                            style={"margin": "0", "fontSize": "13px", "color": "#64748b"}),
@@ -1406,7 +1406,7 @@ app.layout = html.Div([
 
         # FOOTER
         html.Div(
-            f"Dashboard Hidrometeorologi Desa Petir © 2025 | Data CHIRPS | Diperbarui otomatis setiap 30 detik",
+            f"Dashboard Informasi Cuaca Desa Petir © 2026 | Diperbarui otomatis setiap 30 detik",
             style={"textAlign": "center", "fontSize": "12px", "color": "#475569", "paddingBottom": "12px"}
         ),
 
@@ -3400,7 +3400,7 @@ def _handle_tg_command(chat_id, text):
     text = text.strip().lower().split("@")[0]
     if text in ("/start", "/help"):
         _tg_send(chat_id,
-            "🌧️ <b>Bot Hidrometeorologi – Desa Petir</b>\n\n"
+            "🌧️ <b>Bot Informasi Cuaca – Desa Petir</b>\n\n"
             "/status  – Status cuaca sekarang\n"
             "/cuaca   – Parameter cuaca lengkap\n"
             "/risiko  – Indeks risiko longsor saat ini\n"
