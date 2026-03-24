@@ -3280,7 +3280,7 @@ def notif_otomatis(_, risiko_data, state):
         return state
 
     # ── 2. NOTIFIKASI SORE — 16.00 WIB ──────────────────────────────────
-    if now.hour == 12 and now.minute <= 2 and state["sore_sent"] != today:
+    if now.hour == 16 and now.minute <= 2 and state["sore_sent"] != today:
         msg = _buat_pesan_cuaca("🌇 <b>Update Sore — Kondisi Cuaca</b>", "16.00 WIB")
         if send_telegram(msg):
             state["sore_sent"] = today
