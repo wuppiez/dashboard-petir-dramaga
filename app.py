@@ -154,10 +154,10 @@ def load_desa_geojson():
 
 def load_slope_geojson():
     try:
-        with open("slope_dramaga.json", "r", encoding="utf-8") as f:
+        with open("slope_petir.json", "r", encoding="utf-8") as f:
             return _json.load(f)
     except Exception as e:
-        print(f"⚠️  slope_dramaga.json tidak ditemukan: {e}")
+        print(f"⚠️  slope_petir.json tidak ditemukan: {e}")
         return None
 
 DESA_GEOJSON  = load_desa_geojson()   # File lokal kecil — OK di startup
@@ -715,8 +715,7 @@ app.layout = html.Div([
     dcc.Store(id="store-health"),
     dcc.Store(id="store-micromet"),
     dcc.Interval(id="interval-micromet", interval=3_600_000, n_intervals=0),  # 1 jam
-    dcc.Store(id="store-radar",   data={}),
-    dcc.Interval(id="interval-radar", interval=600_000, n_intervals=0),  # 10 menit
+
     dcc.Store(id="store-risiko"),
     dcc.Interval(id="interval-risiko", interval=300_000, n_intervals=0),   # 5 menit
     dcc.Store(id="store-notif-harian", data={"last_sent": ""}),
@@ -1066,13 +1065,7 @@ app.layout = html.Div([
                                            "borderRadius": "6px", "padding": "3px 10px",
                                            "cursor": "pointer", "fontSize": "11px",
                                            "fontWeight": "600"}),
-                        html.Button("🌧 Radar", id="btn-layer-radar",
-                                    n_clicks=1,
-                                    style={"background": "#06b6d433", "color": "#06b6d4",
-                                           "border": "1px solid #06b6d4",
-                                           "borderRadius": "6px", "padding": "3px 10px",
-                                           "cursor": "pointer", "fontSize": "11px",
-                                           "fontWeight": "600"}),
+
                     ], style={"display": "flex", "gap": "6px", "flexWrap": "wrap"}),
                 ], style={"display": "flex", "justifyContent": "space-between",
                           "alignItems": "center", "marginBottom": "10px",
@@ -1094,8 +1087,7 @@ app.layout = html.Div([
                     dl.LayerGroup(id="layer-slope"),
                     # Layer batas desa dari BIG (diupdate via callback)
                     dl.LayerGroup(id="layer-batas-desa"),
-                    # Layer RainViewer radar (dikelola via callback)
-                    dl.LayerGroup(id="layer-radar"),
+
                     # Marker lokasi Desa Petir
                     dl.Marker(
                         position=[LAT, LON],
@@ -1115,14 +1107,6 @@ app.layout = html.Div([
                 center=[LAT, LON], zoom=13,
                 style={"height": "360px", "borderRadius": "8px"},
                 id="main-map"),
-
-                # Radar timestamp info
-                html.Div([
-                    html.Span(id="radar-timestamp",
-                              style={"fontSize":"9px","color":"#06b6d4","fontWeight":"600"}),
-                    html.Span(" | © RainViewer.com",
-                              style={"fontSize":"9px","color":"#334155"}),
-                ], style={"marginTop":"4px","height":"14px"}),
 
                 # Legenda & Copyright
                 html.Div([
@@ -2949,103 +2933,6 @@ def get_risiko_inputs():
         "chirps_date":      str(chirps_last_date)[:10] if chirps_last_date else "–",
         "chirps_age_days":  chirps_age_days,
     }
-
-# ─── CALLBACK: FETCH RAINVIEWER API DATA ─────────────────────────────────────
-@app.callback(
-    Output("store-radar", "data"),
-    Input("interval-radar", "n_intervals"),
-)
-def update_radar_store(_):
-    """
-    Fetch daftar frame radar dari RainViewer API.
-    Gratis, tanpa API key. Update tiap 10 menit.
-    Docs: https://www.rainviewer.com/api/weather-maps-api.html
-    """
-    try:
-        r = requests.get(
-            "https://api.rainviewer.com/public/weather-maps.json",
-            timeout=8
-        )
-        if r.status_code == 200:
-            data = r.json()
-            host = data.get("host", "https://tilecache.rainviewer.com")
-            past = data.get("radar", {}).get("past", [])
-            now  = data.get("radar", {}).get("nowcast", [])
-            # Ambil semua frame past + nowcast (max 12 + 3)
-            frames = past[-12:] + now[:3]
-            return {
-                "host":       host,
-                "frames":     frames,
-                "generated":  data.get("generated", 0),
-                "fetched_at": now_wib().strftime("%H:%M WIB"),
-            }
-    except Exception as e:
-        print(f"⚠️  RainViewer fetch error: {e}")
-    return {}
-
-# ─── CALLBACK: RENDER LAYER RADAR DI PETA ─────────────────────────────────────
-@app.callback(
-    [Output("layer-radar",      "children"),
-     Output("radar-timestamp",  "children")],
-    [Input("store-radar",       "data"),
-     Input("btn-layer-radar",   "n_clicks")],
-)
-def update_radar_layer(radar_data, n_clicks):
-    """
-    Render layer radar RainViewer di atas peta Leaflet.
-    Tampilkan frame terbaru saja (frame terakhir dari past[]).
-    Toggle on/off via tombol.
-    Animasi loop dikerjakan via clientside_callback.
-    """
-    # Toggle off jika n_clicks genap
-    if (n_clicks or 0) % 2 == 0:
-        return [], html.Span("🌧 Radar: OFF", style={"color":"#475569"})
-
-    if not radar_data or not radar_data.get("frames"):
-        return [], html.Span("⚠️ Data radar tidak tersedia", style={"color":"#f59e0b"})
-
-    host   = radar_data.get("host",   "https://tilecache.rainviewer.com")
-    frames = radar_data.get("frames", [])
-    fetched= radar_data.get("fetched_at", "--")
-
-    if not frames:
-        return [], html.Span("Memuat radar...", style={"color":"#64748b"})
-
-    # Ambil frame terbaru (frame ke-12 dari past, atau nowcast pertama)
-    latest = frames[-1]
-    path   = latest.get("path", "")
-    ts     = latest.get("time", 0)
-
-    # Format timestamp WIB
-    try:
-        from datetime import timezone as _tz, timedelta as _td
-        dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=7)))
-        ts_str = dt.strftime("%d %b %Y %H:%M WIB")
-    except Exception:
-        ts_str = "--"
-
-    # URL tile: {host}{path}/{size}/{z}/{x}/{y}/{color}/{options}.png
-    # size=256, color=4 (Universal Blue), options=1_1 (smooth+snow)
-    tile_url = f"{host}{path}/256/{{z}}/{{x}}/{{y}}/4/1_1.png"
-
-    # Render sebagai TileLayer di Leaflet
-    radar_layer = dl.TileLayer(
-        url=tile_url,
-        attribution="© RainViewer.com",
-        opacity=0.7,
-        zIndex=500,
-        id="tile-radar-latest",
-    )
-
-    # Semua frame paths untuk animasi (dikirim sebagai hidden data)
-    all_paths = [f["path"] for f in frames]
-
-    timestamp_info = html.Span(
-        f"🌧 Radar LIVE · Frame {len(frames)} · {ts_str}",
-        style={"color":"#06b6d4"}
-    )
-
-    return [radar_layer], timestamp_info
 
 # ─── CALLBACK: HITUNG INDEKS RISIKO ──────────────────────────────────────────
 @app.callback(
