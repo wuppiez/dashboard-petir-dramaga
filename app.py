@@ -154,10 +154,10 @@ def load_desa_geojson():
 
 def load_slope_geojson():
     try:
-        with open("slope_petir.json", "r", encoding="utf-8") as f:
+        with open("slope_dramaga.json", "r", encoding="utf-8") as f:
             return _json.load(f)
     except Exception as e:
-        print(f"⚠️  slope_petir.json tidak ditemukan: {e}")
+        print(f"⚠️  slope_dramaga.json tidak ditemukan: {e}")
         return None
 
 DESA_GEOJSON  = load_desa_geojson()   # File lokal kecil — OK di startup
@@ -718,7 +718,12 @@ app.layout = html.Div([
 
     dcc.Store(id="store-risiko"),
     dcc.Interval(id="interval-risiko", interval=300_000, n_intervals=0),   # 5 menit
-    dcc.Store(id="store-notif-harian", data={"last_sent": ""}),
+    dcc.Store(id="store-notif-harian", data={
+        "pagi_sent":  "",   # YYYY-MM-DD terakhir kirim pagi
+        "sore_sent":  "",   # YYYY-MM-DD terakhir kirim sore
+        "last_level": "",   # Level risiko terakhir (NORMAL/WASPADA/SIAGA/AWAS)
+        "level_sent": "",   # Timestamp terakhir kirim notif perubahan status
+    }),
     dcc.Interval(id="interval-notif-harian", interval=60_000, n_intervals=0),  # tiap menit
     dcc.Interval(id="interval-realtime", interval=30_000, n_intervals=0),  # 30 detik
     # map layers pakai file lokal (tidak perlu store/interval)
@@ -3168,123 +3173,203 @@ def update_risiko_display(data):
 # ─── CALLBACK: NOTIFIKASI TELEGRAM HARIAN OTOMATIS ───────────────────────────
 @app.callback(
     Output("store-notif-harian", "data"),
-    Input("interval-notif-harian", "n_intervals"),
-    State("store-notif-harian",   "data"),
+    [Input("interval-notif-harian", "n_intervals"),
+     Input("store-risiko",          "data")],
+    State("store-notif-harian", "data"),
     prevent_initial_call=True,
 )
-def notif_harian_otomatis(_, state):
+def notif_otomatis(_, risiko_data, state):
     """
-    Cek setiap menit apakah sudah jam 07.00 WIB.
-    Jika ya dan belum dikirim hari ini → kirim ringkasan pagi ke Telegram.
+    Menangani 3 jenis push notification Telegram:
+    1. Pagi  07.00 WIB — ringkasan cuaca + indeks risiko
+    2. Sore  16.00 WIB — update cuaca sore + indeks risiko
+    3. Perubahan status risiko — naik atau turun (kapan saja)
     """
-    now     = now_wib()
-    today   = now.strftime("%Y-%m-%d")
-    last_sent = (state or {}).get("last_sent", "")
+    state = state or {
+        "pagi_sent": "", "sore_sent": "",
+        "last_level": "", "level_sent": "",
+    }
+    now   = now_wib()
+    today = now.strftime("%Y-%m-%d")
 
-    # Hanya kirim di jam 07.00–07.02 WIB dan belum dikirim hari ini
-    if not (now.hour == 7 and now.minute <= 2 and last_sent != today):
-        return state or {"last_sent": ""}
-
-    try:
-        # ── Data cuaca fused ─────────────────────────────────────────────
-        owm   = fetch_weather()
-        meteo = fetch_openmeteo()
-        bmkg  = fetch_bmkg()
-        fused = fuse_data(owm, meteo, bmkg)
-
-        temp  = fused.get("temp",     27.0)
-        hum   = fused.get("humidity", 80.0)
-        wind  = fused.get("wind",      2.0)
-        desc  = fused.get("bmkg_desc","Berawan")
-
-        curr  = meteo.get("current", {}) if meteo else {}
-        daily = meteo.get("daily",   {}) if meteo else {}
-        et0_l = daily.get("et0_fao_evapotranspiration", [3.0])
-        et0   = et0_l[0] if et0_l else 3.0
-        rh    = curr.get("relative_humidity_2m", hum)
-        ws    = curr.get("wind_speed_10m", wind)
-        uv    = curr.get("uv_index", 0)
-        pres  = curr.get("surface_pressure", 1013)
-
-        # ── Data CHIRPS kemarin ──────────────────────────────────────────
-        df = get_hist_data(full=False)
-        ch_h = cum3 = cum7 = 0.0
-        ch_kemarin_str = "–"
-        if df is not None and len(df) > 0:
-            df_s   = df.sort_values("date")
-            ch_h   = float(df_s.iloc[-1]["rainfall"])
-            cum3   = float(df_s.tail(3)["rainfall"].sum())
-            cum7   = float(df_s.tail(7)["rainfall"].sum())
-            tgl    = df_s.iloc[-1]["date"]
-            ch_kemarin_str = f"{ch_h:.1f} mm ({tgl.strftime('%d %b') if hasattr(tgl,'strftime') else str(tgl)[:10]})"
-
-        # ── Indeks risiko ────────────────────────────────────────────────
-        hasil = hitung_indeks_risiko(ch_h, cum3, cum7, rh, et0, ws)
-        indeks = hasil["indeks"]
-        level  = hasil["level"]
-        e_lvl  = hasil["emoji"]
-
-        # ── Prakiraan hari ini dari BMKG ─────────────────────────────────
-        fcst_txt = "Tidak tersedia"
+    # ── Helper: buat pesan cuaca ringkas ────────────────────────────────
+    def _buat_pesan_cuaca(judul, jam_label):
         try:
-            bmkg_cuaca = bmkg.get("cuaca", []) if bmkg else []
-            if bmkg_cuaca:
-                today_items = []
-                for periode in bmkg_cuaca:
+            owm   = fetch_weather()
+            meteo = fetch_openmeteo()
+            bmkg  = fetch_bmkg()
+            fused = fuse_data(owm, meteo, bmkg)
+
+            temp  = fused.get("temp",     27.0)
+            hum   = fused.get("humidity", 80.0)
+            wind  = fused.get("wind",      2.0)
+            desc  = fused.get("bmkg_desc", "Berawan")
+
+            curr  = meteo.get("current", {}) if meteo else {}
+            daily = meteo.get("daily",   {}) if meteo else {}
+            et0_l = daily.get("et0_fao_evapotranspiration", [])
+            et0   = float(et0_l[0]) if et0_l else 3.0
+            uv    = curr.get("uv_index",  0)
+            pres  = curr.get("surface_pressure", 1013)
+            rh_om = curr.get("relative_humidity_2m", hum)
+
+            # Indeks risiko
+            d = get_risiko_inputs()
+            h = hitung_indeks_risiko(
+                d["ch_h"], d["cum3"], d["cum7"],
+                d["rh"],   d["et0"],  d["ws"]
+            )
+
+            # Prakiraan BMKG hari ini
+            fcst_txt = desc
+            try:
+                cl = bmkg.get("cuaca", []) if bmkg else []
+                for periode in cl:
                     for item in (periode if isinstance(periode, list) else []):
                         if str(item.get("local_datetime",""))[:10] == today:
-                            today_items.append(item)
-                if today_items:
-                    mid = today_items[len(today_items)//2]
-                    fcst_txt = mid.get("weather_desc", "Berawan")
+                            fcst_txt = item.get("weather_desc", desc)
+                            break
+            except Exception:
+                pass
+
+            msg_parts = [
+                f"{judul}",
+                f"📅 {now.strftime('%A, %d %B %Y')} | {jam_label}",
+                "━━━━━━━━━━━━━━━━━━━━━━",
+                "",
+                "🌤 <b>Kondisi Cuaca</b>",
+                f"   Suhu        : {temp:.1f}°C",
+                f"   Kelembaban  : {rh_om:.0f}%",
+                f"   Angin       : {wind:.1f} m/s",
+                f"   Tekanan     : {pres:.0f} hPa",
+                f"   UV Index    : {uv:.1f}",
+                f"   ET₀         : {et0:.2f} mm/hari",
+                f"   BMKG        : {desc}",
+                "",
+                f"🗺 <b>Prakiraan (BMKG)</b>",
+                f"   {fcst_txt}",
+                "",
+                "━━━━━━━━━━━━━━━━━━━━━━",
+                f"{h['emoji']} <b>Indeks Risiko: {h['indeks']}/100 — {h['level']}</b>",
+                f"   CH Harian  : {d['ch_h']:.1f} mm [{d['ch_src']}]",
+                f"   Kum 3 Hari : {d['cum3']:.1f} mm",
+                f"   Kum 7 Hari : {d['cum7']:.1f} mm",
+                "",
+                "📍 Desa Petir, Kec. Dramaga, Kab. Bogor",
+            ]
+
+            if h["level"] == "AWAS":
+                msg_parts += [
+                    "",
+                    "🚨 <b>PERHATIAN!</b> Risiko longsor TINGGI.",
+                    "   Pantau kondisi lereng & siapkan jalur evakuasi.",
+                ]
+            elif h["level"] == "SIAGA":
+                msg_parts += ["", "⚠️ Risiko SEDANG. Pantau terus kondisi cuaca."]
+
+            return "\n".join(msg_parts)
+        except Exception as e:
+            return f"⚠️ Gagal mengambil data: {e}"
+
+    # ── 1. NOTIFIKASI PAGI — 07.00 WIB ──────────────────────────────────
+    if now.hour == 7 and now.minute <= 2 and state["pagi_sent"] != today:
+        msg = _buat_pesan_cuaca("🌅 <b>Selamat Pagi — Ringkasan Cuaca</b>", "07.00 WIB")
+        if send_telegram(msg):
+            state["pagi_sent"] = today
+            print(f"✅ Push pagi terkirim: {today}")
+        return state
+
+    # ── 2. NOTIFIKASI SORE — 16.00 WIB ──────────────────────────────────
+    if now.hour == 16 and now.minute <= 2 and state["sore_sent"] != today:
+        msg = _buat_pesan_cuaca("🌇 <b>Update Sore — Kondisi Cuaca</b>", "16.00 WIB")
+        if send_telegram(msg):
+            state["sore_sent"] = today
+            print(f"✅ Push sore terkirim: {today}")
+        return state
+
+    # ── 3. NOTIFIKASI PERUBAHAN STATUS RISIKO ────────────────────────────
+    if not risiko_data:
+        return state
+
+    level_baru = risiko_data.get("level", "")
+    level_lama = state.get("last_level", "")
+
+    # Update last_level meski tidak kirim notif
+    if level_baru:
+        state["last_level"] = level_baru
+
+    # Hanya proses jika ada perubahan dan level_lama sudah pernah diset
+    if not level_baru or not level_lama or level_baru == level_lama:
+        return state
+
+    # Throttle: max 1 notif perubahan per 30 menit
+    now_str = now.strftime("%Y-%m-%d %H:%M")
+    last_sent_dt = state.get("level_sent", "")
+    if last_sent_dt:
+        try:
+            from datetime import datetime as _dt
+            last_dt = _dt.strptime(last_sent_dt, "%Y-%m-%d %H:%M")
+            last_dt = last_dt.replace(tzinfo=WIB)
+            if (now - last_dt).total_seconds() < 1800:
+                return state
         except Exception:
             pass
 
-        # ── Susun pesan ──────────────────────────────────────────────────
-        msg_parts = [
-            f"🌅 <b>Ringkasan Pagi — Desa Petir</b>",
-            f"📅 {now.strftime('%A, %d %B %Y')} | 07.00 WIB",
-            "━━━━━━━━━━━━━━━━━━━━━━",
-            "",
-            "🌡 <b>Kondisi Cuaca Sekarang</b>",
-            f"   Suhu        : {temp:.1f}°C",
-            f"   Kelembaban  : {hum:.0f}%",
-            f"   Angin       : {wind:.1f} m/s",
-            f"   Tekanan     : {pres:.0f} hPa",
-            f"   UV Index    : {uv:.1f}",
-            f"   ET₀         : {et0:.2f} mm/hari",
-            f"   BMKG        : {desc}",
-            "",
-            "🌧 <b>Data Curah Hujan</b>",
-            f"   Kemarin     : {ch_kemarin_str}",
-            f"   Kum 3 Hari  : {cum3:.1f} mm",
-            f"   Kum 7 Hari  : {cum7:.1f} mm",
-            "",
-            "🗺 <b>Prakiraan Hari Ini (BMKG)</b>",
-            f"   {fcst_txt}",
-            "",
-            "━━━━━━━━━━━━━━━━━━━━━━",
-            f"{e_lvl} <b>Indeks Risiko Longsor: {indeks}/100 — {level}</b>",
-        ]
-        if level == "AWAS":
-            msg_parts += [
-                "",
-                "🚨 <b>PERHATIAN!</b> Risiko longsor TINGGI.",
-                f"   Pantau kondisi lereng, siapkan jalur evakuasi.",
-                f"   CH ≥{THRESHOLD['ch_h']['awas']} mm atau kondisi tanah jenuh.",
-            ]
-        elif level == "SIAGA":
-            msg_parts += ["", "⚠️ Risiko SEDANG. Pantau terus kondisi cuaca."]
-        msg_parts.append("")
-        msg_parts.append("📍 Desa Petir, Kec. Dramaga, Kab. Bogor")
-        msg = "\n".join(msg_parts)
-        send_telegram(msg)
-        print(f"✅ Notifikasi harian terkirim: {today} jam {now.strftime('%H:%M')} WIB")
-        return {"last_sent": today}
+    # Tentukan arah perubahan
+    urutan = {"NORMAL": 0, "WASPADA": 1, "SIAGA": 2, "AWAS": 3}
+    idx_baru = urutan.get(level_baru, 0)
+    idx_lama = urutan.get(level_lama, 0)
 
-    except Exception as e:
-        print(f"⚠️  Notifikasi harian error: {e}")
-        return state or {"last_sent": ""}
+    if idx_baru > idx_lama:
+        arah   = "naik ⬆️"
+        arah_emoji = "🔴" if idx_baru >= 3 else "🟠" if idx_baru >= 2 else "🟡"
+        pesan_arah = "⚠️ <b>STATUS RISIKO NAIK</b>"
+    else:
+        arah   = "turun ⬇️"
+        arah_emoji = "🟢" if idx_baru == 0 else "🟡" if idx_baru == 1 else "🟠"
+        pesan_arah = "✅ <b>STATUS RISIKO TURUN</b>"
+
+    emoji_map = {"NORMAL":"🟢","WASPADA":"🟡","SIAGA":"🟠","AWAS":"🔴"}
+    e_lama = emoji_map.get(level_lama, "⚪")
+    e_baru = emoji_map.get(level_baru, "⚪")
+
+    indeks   = risiko_data.get("indeks", 0)
+    inp      = risiko_data.get("input",  {})
+
+    msg_parts = [
+        f"{arah_emoji} {pesan_arah}",
+        f"━━━━━━━━━━━━━━━━━━━━━━",
+        f"Status {arah}",
+        f"   {e_lama} {level_lama}  →  {e_baru} {level_baru}",
+        f"",
+        f"📊 Indeks Risiko : <b>{indeks}/100</b>",
+        f"🌧 CH Harian     : {inp.get('ch_h', 0):.1f} mm",
+        f"📊 Kum 3 Hari   : {inp.get('cum3', 0):.1f} mm",
+        f"📊 Kum 7 Hari   : {inp.get('cum7', 0):.1f} mm",
+        f"💧 Kelembaban    : {inp.get('rh', 0):.0f}%",
+        f"🌿 ET₀          : {inp.get('et0', 0):.2f} mm/hari",
+        f"💨 Angin        : {inp.get('ws', 0):.1f} m/s",
+        f"━━━━━━━━━━━━━━━━━━━━━━",
+        f"⏰ {now.strftime('%d %b %Y %H:%M WIB')}",
+        f"📍 Desa Petir, Dramaga, Bogor",
+    ]
+
+    if level_baru == "AWAS":
+        msg_parts += [
+            "",
+            "🚨 <b>TINDAKAN DIPERLUKAN!</b>",
+            "   Pantau kondisi lereng & siapkan jalur evakuasi.",
+        ]
+    elif level_baru == "NORMAL" and level_lama in ("SIAGA","AWAS"):
+        msg_parts += ["", "✅ Kondisi sudah kembali aman. Tetap waspada."]
+
+    msg = "\n".join(msg_parts)
+    if send_telegram(msg):
+        state["level_sent"] = now_str
+        print(f"✅ Push perubahan status: {level_lama} → {level_baru} ({arah})")
+
+    return state
+
 
 # ─── TELEGRAM WEBHOOK ROUTE ────────────────────────────────────────────────────
 from flask import request as flask_request, jsonify
