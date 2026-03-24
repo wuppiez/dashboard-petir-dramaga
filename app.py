@@ -715,6 +715,8 @@ app.layout = html.Div([
     dcc.Store(id="store-health"),
     dcc.Store(id="store-micromet"),
     dcc.Interval(id="interval-micromet", interval=3_600_000, n_intervals=0),  # 1 jam
+    dcc.Store(id="store-radar",   data={}),
+    dcc.Interval(id="interval-radar", interval=600_000, n_intervals=0),  # 10 menit
     dcc.Store(id="store-risiko"),
     dcc.Interval(id="interval-risiko", interval=300_000, n_intervals=0),   # 5 menit
     dcc.Store(id="store-notif-harian", data={"last_sent": ""}),
@@ -954,24 +956,72 @@ app.layout = html.Div([
                 # ── ROW 2: KONDISI & MAP ────────────────────────────────────────────
         html.Div([
 
-            # Panel kiri: kondisi cuaca + prakiraan
+            # Panel kiri: kondisi cuaca terkini (dinamis)
             html.Div([
-                html.Div([
-                    html.H3("🌤 Kondisi Cuaca Terkini", style={"color": "#38bdf8", "margin": "0 0 16px",
-                                                               "fontSize": "15px", "fontWeight": "600"}),
-                    html.Div(id="weather-description",
-                             style={"fontSize": "16px", "color": "#f1f5f9", "marginBottom": "8px"}),
-                    html.Div(id="weather-feelslike",
-                             style={"fontSize": "13px", "color": "#94a3b8"}),
+                html.Div("🌤 Kondisi Cuaca Terkini",
+                         style={"fontSize":"14px","fontWeight":"700","color":"#38bdf8","marginBottom":"12px"}),
 
-                ], style={"height": "100%"}),
+                # Deskripsi + feels like (dari OWM)
+                html.Div(id="weather-description",
+                         style={"fontSize":"20px","fontWeight":"700","color":"#f1f5f9","marginBottom":"4px"}),
+                html.Div(id="weather-feelslike",
+                         style={"fontSize":"12px","color":"#94a3b8","marginBottom":"14px"}),
+
+                # Grid 2×3 — parameter cuaca utama
+                html.Div([
+                    # Baris 1
+                    html.Div([
+                        html.Div("🌡 Suhu",   style={"fontSize":"10px","color":"#64748b"}),
+                        html.Div(id="cw-temp", style={"fontSize":"16px","fontWeight":"700","color":"#ef4444"}),
+                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
+                              "padding":"10px","border":"1px solid #ef444422"}),
+                    html.Div([
+                        html.Div("💧 Kelembaban", style={"fontSize":"10px","color":"#64748b"}),
+                        html.Div(id="cw-rh",    style={"fontSize":"16px","fontWeight":"700","color":"#38bdf8"}),
+                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
+                              "padding":"10px","border":"1px solid #38bdf822"}),
+                    html.Div([
+                        html.Div("🌧 CH", style={"fontSize":"10px","color":"#64748b"}),
+                        html.Div(id="cw-rain",  style={"fontSize":"16px","fontWeight":"700","color":"#06b6d4"}),
+                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
+                              "padding":"10px","border":"1px solid #06b6d422"}),
+                ], style={"display":"flex","gap":"8px","marginBottom":"8px"}),
+                html.Div([
+                    html.Div([
+                        html.Div("💨 Angin",   style={"fontSize":"10px","color":"#64748b"}),
+                        html.Div(id="cw-wind",  style={"fontSize":"16px","fontWeight":"700","color":"#8b5cf6"}),
+                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
+                              "padding":"10px","border":"1px solid #8b5cf622"}),
+                    html.Div([
+                        html.Div("🔵 Tekanan", style={"fontSize":"10px","color":"#64748b"}),
+                        html.Div(id="cw-pres",  style={"fontSize":"16px","fontWeight":"700","color":"#f59e0b"}),
+                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
+                              "padding":"10px","border":"1px solid #f59e0b22"}),
+                    html.Div([
+                        html.Div("☀️ UV",      style={"fontSize":"10px","color":"#64748b"}),
+                        html.Div(id="cw-uv",    style={"fontSize":"16px","fontWeight":"700","color":"#eab308"}),
+                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
+                              "padding":"10px","border":"1px solid #eab30822"}),
+                ], style={"display":"flex","gap":"8px","marginBottom":"10px"}),
+
+                # Suhu tanah compact
+                html.Div([
+                    html.Span("🌱 Tanah: ", style={"fontSize":"10px","color":"#64748b"}),
+                    html.Span(id="cw-soil", style={"fontSize":"10px","color":"#f97316","fontWeight":"600"}),
+                ], style={"marginBottom":"8px"}),
+
+                # Sumber + waktu update
+                html.Div(id="cw-updated",
+                         style={"fontSize":"9px","color":"#334155","marginTop":"auto"}),
             ], style={
                 "background": "linear-gradient(135deg, #1e293b, #0f172a)",
                 "border": "1px solid #1e40af33",
                 "borderRadius": "12px",
-                "padding": "20px",
+                "padding": "16px 18px",
                 "flex": "1",
-                "minWidth": "300px",
+                "minWidth": "280px",
+                "display": "flex",
+                "flexDirection": "column",
             }),
 
             # Panel kanan: peta
@@ -1016,6 +1066,13 @@ app.layout = html.Div([
                                            "borderRadius": "6px", "padding": "3px 10px",
                                            "cursor": "pointer", "fontSize": "11px",
                                            "fontWeight": "600"}),
+                        html.Button("🌧 Radar", id="btn-layer-radar",
+                                    n_clicks=1,
+                                    style={"background": "#06b6d433", "color": "#06b6d4",
+                                           "border": "1px solid #06b6d4",
+                                           "borderRadius": "6px", "padding": "3px 10px",
+                                           "cursor": "pointer", "fontSize": "11px",
+                                           "fontWeight": "600"}),
                     ], style={"display": "flex", "gap": "6px", "flexWrap": "wrap"}),
                 ], style={"display": "flex", "justifyContent": "space-between",
                           "alignItems": "center", "marginBottom": "10px",
@@ -1037,6 +1094,8 @@ app.layout = html.Div([
                     dl.LayerGroup(id="layer-slope"),
                     # Layer batas desa dari BIG (diupdate via callback)
                     dl.LayerGroup(id="layer-batas-desa"),
+                    # Layer RainViewer radar (dikelola via callback)
+                    dl.LayerGroup(id="layer-radar"),
                     # Marker lokasi Desa Petir
                     dl.Marker(
                         position=[LAT, LON],
@@ -1056,6 +1115,14 @@ app.layout = html.Div([
                 center=[LAT, LON], zoom=13,
                 style={"height": "360px", "borderRadius": "8px"},
                 id="main-map"),
+
+                # Radar timestamp info
+                html.Div([
+                    html.Span(id="radar-timestamp",
+                              style={"fontSize":"9px","color":"#06b6d4","fontWeight":"600"}),
+                    html.Span(" | © RainViewer.com",
+                              style={"fontSize":"9px","color":"#334155"}),
+                ], style={"marginTop":"4px","height":"14px"}),
 
                 # Legenda & Copyright
                 html.Div([
@@ -1371,6 +1438,88 @@ def update_weather_store(_):
     return fetch_weather()
 
 # 2. Update metric cards
+
+# ─── CALLBACK: KONDISI CUACA TERKINI (PANEL KIRI) ────────────────────────────
+@app.callback(
+    [Output("weather-description", "children"),
+     Output("weather-feelslike",   "children"),
+     Output("cw-temp",   "children"),
+     Output("cw-rh",     "children"),
+     Output("cw-rain",   "children"),
+     Output("cw-wind",   "children"),
+     Output("cw-pres",   "children"),
+     Output("cw-uv",     "children"),
+     Output("cw-soil",   "children"),
+     Output("cw-updated","children")],
+    [Input("store-fused",    "data"),
+     Input("store-openmeteo","data")],
+)
+def update_cuaca_terkini(fused, meteo):
+    if not fused:
+        fused = {}
+    if not meteo:
+        meteo = {}
+
+    curr  = meteo.get("current", {})
+    daily = meteo.get("daily",   {})
+
+    # Data dari fused (weighted average)
+    temp  = fused.get("temp",     "--")
+    rh    = fused.get("humidity", "--")
+    rain  = fused.get("rain",     0.0)
+    wind  = fused.get("wind",     "--")
+    desc  = fused.get("bmkg_desc","--")
+
+    # Data dari Open-Meteo
+    feels = curr.get("apparent_temperature", None)
+    pres  = curr.get("surface_pressure",     None)
+    uv    = curr.get("uv_index",             None)
+    dew   = curr.get("dew_point_2m",         None)
+    st0   = curr.get("soil_temperature_0cm", None)
+    st6   = curr.get("soil_temperature_6cm", None)
+    st18  = curr.get("soil_temperature_18cm",None)
+
+    # Format
+    temp_str  = f"{temp:.1f} °C"  if isinstance(temp, (int,float)) else "--"
+    rh_str    = f"{rh:.0f} %"     if isinstance(rh,   (int,float)) else "--"
+    rain_str  = f"{rain:.1f} mm"  if isinstance(rain, (int,float)) else "--"
+    wind_str  = f"{wind:.1f} m/s" if isinstance(wind, (int,float)) else "--"
+    pres_str  = f"{pres:.0f} hPa" if isinstance(pres, (int,float)) else "--"
+    uv_str    = f"{uv:.1f}"       if isinstance(uv,   (int,float)) else "--"
+
+    # Feels like
+    feels_str = f"Terasa seperti {feels:.1f}°C" if isinstance(feels,(int,float)) else ""
+    if isinstance(dew,(int,float)):
+        feels_str += f" · Titik Embun {dew:.1f}°C"
+
+    # Suhu tanah
+    soil_parts = []
+    if isinstance(st0,  (int,float)): soil_parts.append(f"{st0:.1f}°C (0cm)")
+    if isinstance(st6,  (int,float)): soil_parts.append(f"{st6:.1f}°C (6cm)")
+    if isinstance(st18, (int,float)): soil_parts.append(f"{st18:.1f}°C (18cm)")
+    soil_str = " · ".join(soil_parts) if soil_parts else "--"
+
+    # Warna rain berdasarkan intensitas
+    rain_val   = rain if isinstance(rain,(int,float)) else 0
+    rain_color = "#ef4444" if rain_val >= 10 else "#f97316" if rain_val >= 5 else "#06b6d4"
+
+    updated = html.Span(
+        f"🔀 Fused: BMKG 50%·OWM 30%·Open-Meteo 20% | ⏱ {now_wib().strftime('%H:%M WIB')}",
+        style={"fontSize":"9px","color":"#334155"}
+    )
+
+    return (
+        desc,
+        feels_str,
+        temp_str,
+        rh_str,
+        html.Span(rain_str, style={"color": rain_color}),
+        wind_str,
+        pres_str,
+        uv_str,
+        soil_str,
+        updated,
+    )
 
 # ─── CALLBACK: UPDATE BMKG STORE ─────────────────────────────────────────────
 @app.callback(
@@ -2800,6 +2949,103 @@ def get_risiko_inputs():
         "chirps_date":      str(chirps_last_date)[:10] if chirps_last_date else "–",
         "chirps_age_days":  chirps_age_days,
     }
+
+# ─── CALLBACK: FETCH RAINVIEWER API DATA ─────────────────────────────────────
+@app.callback(
+    Output("store-radar", "data"),
+    Input("interval-radar", "n_intervals"),
+)
+def update_radar_store(_):
+    """
+    Fetch daftar frame radar dari RainViewer API.
+    Gratis, tanpa API key. Update tiap 10 menit.
+    Docs: https://www.rainviewer.com/api/weather-maps-api.html
+    """
+    try:
+        r = requests.get(
+            "https://api.rainviewer.com/public/weather-maps.json",
+            timeout=8
+        )
+        if r.status_code == 200:
+            data = r.json()
+            host = data.get("host", "https://tilecache.rainviewer.com")
+            past = data.get("radar", {}).get("past", [])
+            now  = data.get("radar", {}).get("nowcast", [])
+            # Ambil semua frame past + nowcast (max 12 + 3)
+            frames = past[-12:] + now[:3]
+            return {
+                "host":       host,
+                "frames":     frames,
+                "generated":  data.get("generated", 0),
+                "fetched_at": now_wib().strftime("%H:%M WIB"),
+            }
+    except Exception as e:
+        print(f"⚠️  RainViewer fetch error: {e}")
+    return {}
+
+# ─── CALLBACK: RENDER LAYER RADAR DI PETA ─────────────────────────────────────
+@app.callback(
+    [Output("layer-radar",      "children"),
+     Output("radar-timestamp",  "children")],
+    [Input("store-radar",       "data"),
+     Input("btn-layer-radar",   "n_clicks")],
+)
+def update_radar_layer(radar_data, n_clicks):
+    """
+    Render layer radar RainViewer di atas peta Leaflet.
+    Tampilkan frame terbaru saja (frame terakhir dari past[]).
+    Toggle on/off via tombol.
+    Animasi loop dikerjakan via clientside_callback.
+    """
+    # Toggle off jika n_clicks genap
+    if (n_clicks or 0) % 2 == 0:
+        return [], html.Span("🌧 Radar: OFF", style={"color":"#475569"})
+
+    if not radar_data or not radar_data.get("frames"):
+        return [], html.Span("⚠️ Data radar tidak tersedia", style={"color":"#f59e0b"})
+
+    host   = radar_data.get("host",   "https://tilecache.rainviewer.com")
+    frames = radar_data.get("frames", [])
+    fetched= radar_data.get("fetched_at", "--")
+
+    if not frames:
+        return [], html.Span("Memuat radar...", style={"color":"#64748b"})
+
+    # Ambil frame terbaru (frame ke-12 dari past, atau nowcast pertama)
+    latest = frames[-1]
+    path   = latest.get("path", "")
+    ts     = latest.get("time", 0)
+
+    # Format timestamp WIB
+    try:
+        from datetime import timezone as _tz, timedelta as _td
+        dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=7)))
+        ts_str = dt.strftime("%d %b %Y %H:%M WIB")
+    except Exception:
+        ts_str = "--"
+
+    # URL tile: {host}{path}/{size}/{z}/{x}/{y}/{color}/{options}.png
+    # size=256, color=4 (Universal Blue), options=1_1 (smooth+snow)
+    tile_url = f"{host}{path}/256/{{z}}/{{x}}/{{y}}/4/1_1.png"
+
+    # Render sebagai TileLayer di Leaflet
+    radar_layer = dl.TileLayer(
+        url=tile_url,
+        attribution="© RainViewer.com",
+        opacity=0.7,
+        zIndex=500,
+        id="tile-radar-latest",
+    )
+
+    # Semua frame paths untuk animasi (dikirim sebagai hidden data)
+    all_paths = [f["path"] for f in frames]
+
+    timestamp_info = html.Span(
+        f"🌧 Radar LIVE · Frame {len(frames)} · {ts_str}",
+        style={"color":"#06b6d4"}
+    )
+
+    return [radar_layer], timestamp_info
 
 # ─── CALLBACK: HITUNG INDEKS RISIKO ──────────────────────────────────────────
 @app.callback(
