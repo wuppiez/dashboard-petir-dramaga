@@ -479,10 +479,56 @@ def fetch_bmkg():
 
 # ─── DATA FUSION ENGINE ────────────────────────────────────────────────────────
 # Bobot tiap sumber (total harus = 1.0)
+# ─── TOMORROW.IO CONFIG ───────────────────────────────────────────────────────
+TOMORROW_API_KEY = os.getenv("TOMORROW_API_KEY", "")
+
+def fetch_tomorrow():
+    """
+    Ambil data real-time dari Tomorrow.io v4 API.
+    Free tier: 25 call/jam, 500 call/hari → interval 5 menit (12 call/jam).
+    Docs: https://docs.tomorrow.io/reference/realtime-weather
+    """
+    if not TOMORROW_API_KEY:
+        return {}
+    try:
+        url = "https://api.tomorrow.io/v4/weather/realtime"
+        params = {
+            "location":  f"{LAT},{LON}",
+            "apikey":    TOMORROW_API_KEY,
+            "units":     "metric",
+        }
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code != 200:
+            print(f"⚠️  Tomorrow.io error {r.status_code}: {r.text[:100]}")
+            return {}
+        data   = r.json()
+        values = data.get("data", {}).get("values", {})
+        return {
+            "temp":        values.get("temperature"),
+            "humidity":    values.get("humidity"),
+            "rain":        values.get("rainIntensity", 0),
+            "wind":        values.get("windSpeed"),
+            "wind_dir":    values.get("windDirection"),
+            "pressure":    values.get("pressureSurfaceLevel"),
+            "uv":          values.get("uvIndex"),
+            "dew_point":   values.get("dewPoint"),
+            "cloud":       values.get("cloudCover"),
+            "visibility":  values.get("visibility"),
+            "precip_prob": values.get("precipitationProbability"),
+            "weather_code":values.get("weatherCode"),
+            "wind_gust":   values.get("windGust"),
+            "ok":          True,
+        }
+    except Exception as e:
+        print(f"⚠️  Tomorrow.io exception: {e}")
+        return {}
+
+# Bobot Data Fusion: BMKG 40% · OWM 20% · Open-Meteo 20% · Tomorrow.io 20%
 WEIGHTS = {
-    "bmkg":  0.50,   # Paling lokal (stasiun Bogor)
-    "owm":   0.30,   # Real-time akurat
-    "meteo": 0.20,   # Model numerik global
+    "bmkg":     0.40,   # Paling lokal (stasiun Bogor)
+    "owm":      0.20,   # Real-time stasiun global
+    "meteo":    0.20,   # Model numerik global (Open-Meteo)
+    "tomorrow": 0.20,   # Tomorrow.io — hyperlocal AI forecast
 }
 
 def wind_dir_to_deg(d):
@@ -509,57 +555,96 @@ def weighted_avg(values, weights):
             total_w += w
     return round(total_v / total_w, 2) if total_w > 0 else None
 
-def fuse_data(owm_data, meteo_data, bmkg_data):
+def fuse_data(owm_data, meteo_data, bmkg_data, tomorrow_data=None):
     """
-    Gabungkan data dari 3 sumber dengan weighted average.
-    Return dict berisi nilai fused + breakdown per sumber.
+    Gabungkan data dari 4 sumber dengan weighted average.
+    BMKG 40% · OWM 20% · Open-Meteo 20% · Tomorrow.io 20%
     """
-    # Ekstrak nilai dari masing-masing sumber
-    owm_temp    = owm_data.get("main", {}).get("temp")
-    owm_hum     = owm_data.get("main", {}).get("humidity")
-    owm_rain    = owm_data.get("rain", {}).get("1h", 0)
-    owm_wind    = owm_data.get("wind", {}).get("speed")
-    owm_pres    = owm_data.get("main", {}).get("pressure")
-    owm_wdir    = owm_data.get("wind", {}).get("deg", 0)
+    tomorrow_data = tomorrow_data or {}
 
-    mc          = meteo_data.get("current", {})
-    met_temp    = mc.get("temperature_2m")
-    met_hum     = mc.get("relative_humidity_2m")
-    met_rain    = mc.get("precipitation", 0)
-    met_wind    = mc.get("wind_speed_10m", 0) / 3.6  # km/h → m/s
-    met_pres    = mc.get("surface_pressure")
-    met_wdir    = mc.get("wind_direction_10m", 0)
+    # ── Ekstrak nilai dari masing-masing sumber ──────────────────────────
+    owm_temp = owm_data.get("main", {}).get("temp")
+    owm_hum  = owm_data.get("main", {}).get("humidity")
+    owm_rain = owm_data.get("rain", {}).get("1h", 0)
+    owm_wind = owm_data.get("wind", {}).get("speed")
+    owm_pres = owm_data.get("main", {}).get("pressure")
+    owm_wdir = owm_data.get("wind", {}).get("deg", 0)
 
-    bmkg_temp   = bmkg_data.get("temp")
-    bmkg_hum    = bmkg_data.get("humidity")
-    bmkg_rain   = 0  # BMKG tidak beri nilai numerik CH
-    bmkg_wind   = bmkg_data.get("wind_speed", 0) / 3.6  # km/h → m/s
-    bmkg_pres   = None  # BMKG tidak sediakan tekanan
-    bmkg_wdir   = wind_dir_to_deg(bmkg_data.get("wind_dir", "S"))
+    mc       = meteo_data.get("current", {})
+    met_temp = mc.get("temperature_2m")
+    met_hum  = mc.get("relative_humidity_2m")
+    met_rain = mc.get("precipitation", 0)
+    met_wind = mc.get("wind_speed_10m", 0)
+    met_pres = mc.get("surface_pressure")
+    met_wdir = mc.get("wind_direction_10m", 0)
 
-    W = [WEIGHTS["bmkg"], WEIGHTS["owm"], WEIGHTS["meteo"]]
+    bmkg_temp = bmkg_data.get("temp")
+    bmkg_hum  = bmkg_data.get("humidity")
+    bmkg_rain = 0
+    bmkg_wind = bmkg_data.get("wind_speed", 0) / 3.6  # km/h → m/s
+    bmkg_pres = None
+    bmkg_wdir = wind_dir_to_deg(bmkg_data.get("wind_dir", "S"))
+
+    tmrw_temp = tomorrow_data.get("temp")
+    tmrw_hum  = tomorrow_data.get("humidity")
+    tmrw_rain = tomorrow_data.get("rain", 0)
+    tmrw_wind = tomorrow_data.get("wind")
+    tmrw_pres = tomorrow_data.get("pressure")
+    tmrw_wdir = tomorrow_data.get("wind_dir", 0)
+    tmrw_ok   = tomorrow_data.get("ok", False)
+
+    # ── Bobot 4 sumber ────────────────────────────────────────────────────
+    Wb = WEIGHTS["bmkg"]
+    Wo = WEIGHTS["owm"]
+    Wm = WEIGHTS["meteo"]
+    Wt = WEIGHTS["tomorrow"]
+
+    # Jika Tomorrow.io tidak tersedia → redistribusi bobotnya ke OWM+Meteo
+    if not tmrw_ok or tmrw_temp is None:
+        # Tidak ada Tomorrow.io: BMKG 40%, OWM 30%, Open-Meteo 30%
+        Wb, Wo, Wm, Wt = 0.40, 0.30, 0.30, 0.0
+        tmrw_temp = tmrw_hum = tmrw_rain = tmrw_wind = tmrw_pres = None
+
+    W4    = [Wb, Wo, Wm, Wt]
+    W_pr  = [0,  Wo, Wm, Wt]   # tekanan: tanpa BMKG
+    W_ch  = [0,  Wo, Wm, Wt]   # CH: tanpa BMKG
 
     fused = {
-        "temp":     weighted_avg([bmkg_temp, owm_temp, met_temp],   W),
-        "humidity": weighted_avg([bmkg_hum,  owm_hum,  met_hum],    W),
-        "rain":     weighted_avg([bmkg_rain, owm_rain, met_rain],    [0, 0.5, 0.5]),  # OWM+Meteo saja
-        "wind":     weighted_avg([bmkg_wind, owm_wind, met_wind],    W),
-        "pressure": weighted_avg([bmkg_pres, owm_pres, met_pres],    [0, 0.5, 0.5]),
-        "wind_dir": weighted_avg([bmkg_wdir, owm_wdir, met_wdir],    W),
-        # Breakdown per sumber untuk ditampilkan di dashboard
+        "temp":     weighted_avg([bmkg_temp, owm_temp, met_temp, tmrw_temp], W4),
+        "humidity": weighted_avg([bmkg_hum,  owm_hum,  met_hum,  tmrw_hum],  W4),
+        "rain":     weighted_avg([bmkg_rain, owm_rain, met_rain, tmrw_rain], W_ch),
+        "wind":     weighted_avg([bmkg_wind, owm_wind, met_wind, tmrw_wind], W4),
+        "pressure": weighted_avg([bmkg_pres, owm_pres, met_pres, tmrw_pres], W_pr),
+        "wind_dir": weighted_avg([bmkg_wdir, owm_wdir, met_wdir, tmrw_wdir], W4),
         "breakdown": {
-            "temp":     {"BMKG": bmkg_temp,  "OpenWeather": owm_temp, "Open-Meteo": met_temp},
-            "humidity": {"BMKG": bmkg_hum,   "OpenWeather": owm_hum,  "Open-Meteo": met_hum},
-            "rain":     {"BMKG": bmkg_rain,  "OpenWeather": owm_rain, "Open-Meteo": met_rain},
-            "wind":     {"BMKG": bmkg_wind,  "OpenWeather": owm_wind, "Open-Meteo": met_wind},
+            "temp":     {"BMKG": bmkg_temp, "OpenWeather": owm_temp,
+                         "Open-Meteo": met_temp, "Tomorrow.io": tmrw_temp},
+            "humidity": {"BMKG": bmkg_hum,  "OpenWeather": owm_hum,
+                         "Open-Meteo": met_hum,  "Tomorrow.io": tmrw_hum},
+            "rain":     {"BMKG": bmkg_rain, "OpenWeather": owm_rain,
+                         "Open-Meteo": met_rain, "Tomorrow.io": tmrw_rain},
+            "wind":     {"BMKG": bmkg_wind, "OpenWeather": owm_wind,
+                         "Open-Meteo": met_wind, "Tomorrow.io": tmrw_wind},
         },
-        "bmkg_desc":   bmkg_data.get("weather_desc", "-"),
-        "bmkg_ok":     bmkg_data.get("ok", False),
-        "sources_ok":  sum([
+        "bmkg_desc":    bmkg_data.get("weather_desc", "-"),
+        "bmkg_ok":      bmkg_data.get("ok", False),
+        "tomorrow_ok":  tmrw_ok,
+        "sources_ok":   sum([
             1 if bmkg_data.get("ok") else 0,
-            1 if owm_temp else 0,
-            1 if met_temp else 0,
+            1 if owm_temp   else 0,
+            1 if met_temp   else 0,
+            1 if tmrw_ok    else 0,
         ]),
+        # Data ekstra dari Tomorrow.io (tidak dari sumber lain)
+        "tomorrow_extra": {
+            "uv":          tomorrow_data.get("uv"),
+            "dew_point":   tomorrow_data.get("dew_point"),
+            "cloud":       tomorrow_data.get("cloud"),
+            "visibility":  tomorrow_data.get("visibility"),
+            "precip_prob": tomorrow_data.get("precip_prob"),
+            "wind_gust":   tomorrow_data.get("wind_gust"),
+            "weather_code":tomorrow_data.get("weather_code"),
+        } if tmrw_ok else {},
     }
     return fused
 
@@ -680,7 +765,7 @@ app = dash.Dash(
         "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css",
     ],
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
-    title="Dashboard Informasi Cuaca – Desa Petir",
+    title="Dashboard Hidrometeorologi – Desa Petir",
 )
 
 # ─── HELPER: CARD METRIC ───────────────────────────────────────────────────────
@@ -711,6 +796,8 @@ app.layout = html.Div([
     dcc.Store(id="store-weather"),
     dcc.Store(id="store-openmeteo"),
     dcc.Store(id="store-bmkg"),
+    dcc.Store(id="store-tomorrow"),
+    dcc.Interval(id="interval-tomorrow", interval=300_000, n_intervals=0),  # 5 menit
     dcc.Store(id="store-cap"),
     dcc.Store(id="store-health"),
     dcc.Store(id="store-micromet"),
@@ -740,7 +827,7 @@ app.layout = html.Div([
             html.Div([
                 html.I(className="fa fa-cloud-rain", style={"fontSize": "32px", "color": "#38bdf8"}),
                 html.Div([
-                    html.H1("Dashboard Informasi Cuaca Desa",
+                    html.H1("Dashboard Informasi Cuaca",
                             style={"margin": "0", "fontSize": "22px", "fontWeight": "700", "color": "#f1f5f9"}),
                     html.P(f"📍 {LOCATION_NAME}",
                            style={"margin": "0", "fontSize": "13px", "color": "#64748b"}),
@@ -807,7 +894,7 @@ app.layout = html.Div([
                 html.Div([
                     html.Span("🔀 Cuaca Terpadu",
                               style={"fontSize":"13px","fontWeight":"700","color":"#38bdf8"}),
-                    html.Span(" — Weighted Average (BMKG 50% · OWM 30% · Open-Meteo 20%)",
+                    html.Span(" — Weighted Average (BMKG 40% · OWM 20% · Open-Meteo 20% · Tomorrow.io 20%)",
                               style={"fontSize":"10px","color":"#475569"}),
                     html.Div(id="fusion-sources-badge",
                              style={"marginLeft":"auto"}),
@@ -1406,7 +1493,7 @@ app.layout = html.Div([
 
         # FOOTER
         html.Div(
-            f"Dashboard Informasi Cuaca Desa Petir © 2026 | Diperbarui otomatis setiap 30 detik",
+            f"Dashboard Hidrometeorologi Desa Petir © 2025 | Data CHIRPS | Diperbarui otomatis setiap 30 detik",
             style={"textAlign": "center", "fontSize": "12px", "color": "#475569", "paddingBottom": "12px"}
         ),
 
@@ -1492,8 +1579,24 @@ def update_cuaca_terkini(fused, meteo):
     rain_val   = rain if isinstance(rain,(int,float)) else 0
     rain_color = "#ef4444" if rain_val >= 10 else "#f97316" if rain_val >= 5 else "#06b6d4"
 
+    # Tomorrow.io data ekstra
+    tmrw_extra   = fused.get("tomorrow_extra", {})
+    tmrw_ok      = fused.get("tomorrow_ok",    False)
+    precip_prob  = tmrw_extra.get("precip_prob")
+    wind_gust    = tmrw_extra.get("wind_gust")
+    visibility   = tmrw_extra.get("visibility")
+
+    # Tambah info Tomorrow.io ke feels_str jika tersedia
+    if tmrw_ok:
+        if precip_prob is not None:
+            feels_str += f" · Peluang Hujan {precip_prob:.0f}%"
+        if wind_gust is not None:
+            feels_str += f" · Angin Maksimum {wind_gust:.1f} m/s"
+
+    n_ok_src  = fused.get("sources_ok", 0)
+    tmrw_lbl  = "BMKG 40%·OWM 20%·OM 20%·Tomorrow 20%" if tmrw_ok else "BMKG 40%·OWM 30%·OM 30%"
     updated = html.Span(
-        f"🔀 Fused: BMKG 50%·OWM 30%·Open-Meteo 20% | ⏱ {now_wib().strftime('%H:%M WIB')}",
+        f"🔀 {tmrw_lbl} | {n_ok_src}/4 aktif | ⏱ {now_wib().strftime('%H:%M WIB')}",
         style={"fontSize":"9px","color":"#334155"}
     )
 
@@ -1510,6 +1613,15 @@ def update_cuaca_terkini(fused, meteo):
         updated,
     )
 
+# ─── CALLBACK: UPDATE TOMORROW.IO STORE ──────────────────────────────────────
+@app.callback(
+    Output("store-tomorrow", "data"),
+    Input("interval-tomorrow", "n_intervals"),
+)
+def update_tomorrow_store(_):
+    """Fetch Tomorrow.io setiap 5 menit (free tier: 25 call/jam)."""
+    return fetch_tomorrow()
+
 # ─── CALLBACK: UPDATE BMKG STORE ─────────────────────────────────────────────
 @app.callback(
     Output("store-bmkg", "data"),
@@ -1523,13 +1635,15 @@ def update_bmkg_store(_):
     Output("store-fused", "data"),
     [Input("store-weather",  "data"),
      Input("store-openmeteo","data"),
-     Input("store-bmkg",     "data")],
+     Input("store-bmkg",     "data"),
+     Input("store-tomorrow", "data")],
 )
-def update_fused_store(owm, meteo, bmkg):
-    if not owm:   owm   = fetch_weather()
-    if not meteo: meteo = fetch_openmeteo()
-    if not bmkg:  bmkg  = fetch_bmkg()
-    return fuse_data(owm, meteo, bmkg)
+def update_fused_store(owm, meteo, bmkg, tomorrow):
+    if not owm:      owm      = fetch_weather()
+    if not meteo:    meteo    = fetch_openmeteo()
+    if not bmkg:     bmkg     = fetch_bmkg()
+    if not tomorrow: tomorrow = fetch_tomorrow()
+    return fuse_data(owm, meteo, bmkg, tomorrow)
 
 # ─── CALLBACK: UPDATE JUDUL HISTORIS DINAMIS ─────────────────────────────────
 @app.callback(
@@ -1720,9 +1834,9 @@ def update_fusion_panel(fused):
     n_ok  = fused.get("sources_ok", 0)
 
     # Warna badge sumber
-    badge_color = "#22c55e" if n_ok == 3 else "#f59e0b" if n_ok == 2 else "#ef4444"
+    badge_color = "#22c55e" if n_ok >= 3 else "#f59e0b" if n_ok == 2 else "#ef4444"
     badge = html.Span(
-        f"✅ {n_ok}/3 Sumber Aktif",
+        f"✅ {n_ok}/4 Sumber Aktif",
         style={"background": badge_color + "22", "color": badge_color,
                "border": f"1px solid {badge_color}", "borderRadius": "6px",
                "padding": "2px 10px", "fontSize": "11px", "fontWeight": "700"},
@@ -2636,6 +2750,7 @@ def update_health_panel(data):
         "bmkg_prakiraan": {"icon": "📡", "label": "BMKG Prakiraan",  "desc": "Prakiraan lokal"},
         "bmkg_cap":       {"icon": "⚠️", "label": "BMKG CAP",        "desc": "Peringatan dini"},
         "chirps":         {"icon": "🛰️", "label": "NASA CHIRPS",     "desc": "Data CH harian"},
+        "tomorrow":       {"icon": "🌤️", "label": "Tomorrow.io",     "desc": "Hyperlocal forecast"},
         "supabase":       {"icon": "🗄️", "label": "Supabase",        "desc": "Database"},
         "telegram":       {"icon": "📨", "label": "Telegram Bot",    "desc": "Notifikasi"},
     }
