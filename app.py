@@ -100,7 +100,7 @@ def hitung_indeks_risiko(ch_h, cum3, cum7, rh_air=80.0, sm=0.30, et0=3.0, ws=2.0
     s_ch    = min(ch_h  / THRESHOLD["ch_h"]["awas"],    1.0) * RISIKO_WEIGHTS["ch_h"]
     s_c3    = min(cum3  / THRESHOLD["cum3"]["awas"],    1.0) * RISIKO_WEIGHTS["cum3"]
     s_c7    = min(cum7  / THRESHOLD["cum7"]["awas"],    1.0) * RISIKO_WEIGHTS["cum7"]
-    s_rh    = max(rh_air - 70, 0) / 20                      * RISIKO_WEIGHTS["rh_air"]
+    s_rh    = min(max(rh_air - 70, 0) / 20, 1.0)            * RISIKO_WEIGHTS["rh_air"]
     s_sm    = min(sm    / THRESHOLD["sm"]["awas"],      1.0) * RISIKO_WEIGHTS["sm"]
     s_et0   = max(THRESHOLD["et0"]["waspada"] - et0, 0) / THRESHOLD["et0"]["waspada"] * RISIKO_WEIGHTS["et0"]
     s_ws    = min(ws    / THRESHOLD["ws"]["awas"],      1.0) * RISIKO_WEIGHTS["ws"]
@@ -3424,7 +3424,8 @@ def notif_otomatis(_, risiko_data, state):
             owm   = fetch_weather()
             meteo = fetch_openmeteo()
             bmkg  = fetch_bmkg()
-            fused = fuse_data(owm, meteo, bmkg)
+            tmrw  = fetch_tomorrow()
+            fused = fuse_data(owm, meteo, bmkg, tmrw)
 
             temp  = fused.get("temp",     27.0)
             hum   = fused.get("humidity", 80.0)
@@ -3458,12 +3459,24 @@ def notif_otomatis(_, risiko_data, state):
             except Exception:
                 pass
 
+            # Data tambahan Tomorrow.io
+            tmrw_extra   = fused.get("tomorrow_extra", {})
+            tmrw_ok      = fused.get("tomorrow_ok", False)
+            precip_prob  = tmrw_extra.get("precip_prob")
+            wind_gust    = tmrw_extra.get("wind_gust")
+            n_src        = fused.get("sources_ok", 0)
+            src_label    = "BMKG 40%·OWM 20%·OM 20%·Tomorrow 20%" if tmrw_ok else "BMKG 40%·OWM 30%·OM 30%"
+
+            # Baris opsional
+            precip_line = f"   Peluang Hujan : {precip_prob:.0f}%" if precip_prob is not None else ""
+            gust_line   = f"   Angin Maks    : {wind_gust:.1f} m/s" if wind_gust is not None else ""
+
             msg_parts = [
                 f"{judul}",
                 f"📅 {now.strftime('%A, %d %B %Y')} | {jam_label}",
                 "━━━━━━━━━━━━━━━━━━━━━━",
                 "",
-                "🌤 <b>Kondisi Cuaca</b>",
+                f"🌤 <b>Kondisi Cuaca</b> ({n_src}/4 sumber aktif)",
                 f"   Suhu        : {temp:.1f}°C",
                 f"   Kelembaban  : {rh_om:.0f}%",
                 f"   Angin       : {wind:.1f} m/s",
@@ -3471,6 +3484,10 @@ def notif_otomatis(_, risiko_data, state):
                 f"   UV Index    : {uv:.1f}",
                 f"   ET₀         : {et0:.2f} mm/hari",
                 f"   BMKG        : {desc}",
+            ]
+            if precip_line: msg_parts.append(precip_line)
+            if gust_line:   msg_parts.append(gust_line)
+            msg_parts += [
                 "",
                 f"🗺 <b>Prakiraan (BMKG)</b>",
                 f"   {fcst_txt}",
@@ -3482,6 +3499,7 @@ def notif_otomatis(_, risiko_data, state):
                 f"   Kum 7 Hari      : {d['cum7']:.1f} mm",
                 f"   Kelem. Udara    : {d['rh_air']:.0f}%",
                 f"   Kelem. Tanah    : {d['sm']:.3f} m³/m³",
+                f"   🔀 {src_label}",
                 "",
                 "📍 Desa Petir, Kec. Dramaga, Kab. Bogor",
             ]
@@ -3570,6 +3588,20 @@ def notif_otomatis(_, risiko_data, state):
     indeks   = risiko_data.get("indeks", 0)
     inp      = risiko_data.get("input",  {})
 
+    # Ambil data real-time terkini untuk pesan perubahan status
+    try:
+        d_now     = get_risiko_inputs()
+        ch_h_now  = d_now["ch_h"];   ch_src_now = d_now["ch_src"]
+        cum3_now  = d_now["cum3"];   cum7_now   = d_now["cum7"]
+        rh_now    = d_now["rh_air"]; sm_now     = d_now["sm"]
+        et0_now   = d_now["et0"];    ws_now     = d_now["ws"]
+    except Exception:
+        ch_h_now  = inp.get("ch_h", 0);          ch_src_now = "–"
+        cum3_now  = inp.get("cum3", 0);           cum7_now   = inp.get("cum7", 0)
+        rh_now    = inp.get("rh_air", inp.get("rh", 80))
+        sm_now    = inp.get("sm", 0.30)
+        et0_now   = inp.get("et0", 0);            ws_now     = inp.get("ws", 0)
+
     msg_parts = [
         f"{arah_emoji} {pesan_arah}",
         f"━━━━━━━━━━━━━━━━━━━━━━",
@@ -3577,13 +3609,13 @@ def notif_otomatis(_, risiko_data, state):
         f"   {e_lama} {level_lama}  →  {e_baru} {level_baru}",
         f"",
         f"📊 Indeks Risiko : <b>{indeks}/100</b>",
-        f"🌧 CH Harian     : {inp.get('ch_h', 0):.1f} mm",
-        f"📊 Kum 3 Hari   : {inp.get('cum3', 0):.1f} mm",
-        f"📊 Kum 7 Hari   : {inp.get('cum7', 0):.1f} mm",
-        f"💧 Kelem. Udara  : {inp.get('rh_air', 80):.0f}%",
-        f"🌱 Kelem. Tanah  : {inp.get('sm', 0.30):.3f} m³/m³",
-        f"🌿 ET₀          : {inp.get('et0', 0):.2f} mm/hari",
-        f"💨 Angin        : {inp.get('ws', 0):.1f} m/s",
+        f"🌧 CH Harian     : {ch_h_now:.1f} mm [{ch_src_now}]",
+        f"📊 Kum 3 Hari   : {cum3_now:.1f} mm",
+        f"📊 Kum 7 Hari   : {cum7_now:.1f} mm",
+        f"💧 Kelem. Udara  : {rh_now:.0f}%",
+        f"🌱 Kelem. Tanah  : {sm_now:.3f} m³/m³",
+        f"🌿 ET₀          : {et0_now:.2f} mm/hari",
+        f"💨 Kec. Angin   : {ws_now:.1f} m/s",
         f"━━━━━━━━━━━━━━━━━━━━━━",
         f"⏰ {now.strftime('%d %b %Y %H:%M WIB')}",
         f"📍 Desa Petir, Dramaga, Bogor",
@@ -3595,8 +3627,12 @@ def notif_otomatis(_, risiko_data, state):
             "🚨 <b>TINDAKAN DIPERLUKAN!</b>",
             "   Pantau kondisi lereng & siapkan jalur evakuasi.",
         ]
-    elif level_baru == "NORMAL" and level_lama in ("SIAGA","AWAS"):
-        msg_parts += ["", "✅ Kondisi sudah kembali aman. Tetap waspada."]
+    elif level_baru == "SIAGA":
+        msg_parts += ["", "⚠️ Waspada! Pantau terus kondisi cuaca."]
+    elif level_baru == "WASPADA":
+        msg_parts += ["", "🟡 Tetap pantau. Intensitas hujan mulai meningkat."]
+    elif level_baru == "NORMAL" and level_lama in ("SIAGA","AWAS","WASPADA"):
+        msg_parts += ["", "✅ Kondisi kembali aman. Tetap waspada."]
 
     msg = "\n".join(msg_parts)
     if send_telegram(msg):
@@ -3651,7 +3687,8 @@ def _handle_tg_command(chat_id, text):
             owm   = fetch_weather()
             meteo = fetch_openmeteo()
             bmkg  = fetch_bmkg()
-            fused = fuse_data(owm, meteo, bmkg)
+            tmrw  = fetch_tomorrow()
+            fused = fuse_data(owm, meteo, bmkg, tmrw)
             temp  = fused.get("temp", 27.0)
             hum   = fused.get("humidity", 80.0)
             rain  = fused.get("rain", 0.0)
@@ -3683,7 +3720,8 @@ def _handle_tg_command(chat_id, text):
             owm   = fetch_weather()
             meteo = fetch_openmeteo()
             bmkg  = fetch_bmkg()
-            fused = fuse_data(owm, meteo, bmkg)
+            tmrw  = fetch_tomorrow()
+            fused = fuse_data(owm, meteo, bmkg, tmrw)
             curr  = meteo.get("current", {}) if meteo else {}
             et0   = (meteo.get("daily",{}).get("et0_fao_evapotranspiration",[4.0]) or [4.0])[0]
             uv    = curr.get("uv_index", 0)
