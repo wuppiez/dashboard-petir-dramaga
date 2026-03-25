@@ -149,6 +149,10 @@ def parse_nasa_to_rows(param_data: dict, existing_dates: set) -> list:
             "t2m_dew":    get_val("T2MDEW"),
             "source":     "NASA_POWER",
         }
+
+      if row["t2m"] is None and row["prec_nasa"] is None:
+            continue
+        
         rows.append(row)
 
     return rows
