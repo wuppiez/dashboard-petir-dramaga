@@ -72,36 +72,40 @@ DATA_FILE       = "data/rainfall_historical.csv"
 THRESHOLD_RT = {"WASPADA": 27, "SIAGA": 29, "AWAS": 42}  # CH harian mm/hari
 
 THRESHOLD = {
-    "ch_h":  {"waspada": 27,  "siaga": 29,  "awas": 42},    # mm/hari  — CHIRPS P25/P50/P75
-    "cum3":  {"waspada": 40,  "siaga": 75,  "awas": 110},   # mm/3hr   — PVMBG antecedent
-    "cum7":  {"waspada": 131, "siaga": 173, "awas": 205},   # mm/7hr   — Van Westen
-    "rh":    {"waspada": 75,  "siaga": 85,  "awas": 90},    # %        — Crozier (1999)
-    "et0":   {"waspada": 3.5, "siaga": 2.5, "awas": 1.5},  # mm/hari  — defisit air tanah
-    "ws":    {"waspada": 3,   "siaga": 6,   "awas": 9},     # m/s      — angin kencang lokal
+    "ch_h":   {"waspada": 27,   "siaga": 29,   "awas": 42},     # mm/hari  — CHIRPS P25/P50/P75
+    "cum3":   {"waspada": 40,   "siaga": 75,   "awas": 110},    # mm/3hr   — PVMBG antecedent
+    "cum7":   {"waspada": 131,  "siaga": 173,  "awas": 205},    # mm/7hr   — Van Westen
+    "rh_air": {"waspada": 75,   "siaga": 85,   "awas": 90},     # %        — Crozier (1999)
+    "sm":     {"waspada": 0.30, "siaga": 0.38, "awas": 0.45},   # m³/m³    — kelembaban tanah
+    "et0":    {"waspada": 3.5,  "siaga": 2.5,  "awas": 1.5},    # mm/hari  — defisit air tanah
+    "ws":     {"waspada": 3,    "siaga": 6,    "awas": 9},       # m/s      — angin kencang lokal
 }
 
 RISIKO_WEIGHTS = {
-    "ch_h": 30,  # CH harian       — korelasi tertinggi (0.459) vs severity
-    "cum3": 25,  # Kumulatif 3 hr  — antecedent rainfall PVMBG
-    "cum7": 20,  # Kumulatif 7 hr  — soil saturation Van Westen
-    "rh":   15,  # Kelembaban udara — Crozier (1999)
-    "et0":   5,  # Evapotranspirasi — defisit air tanah
-    "ws":    5,  # Kec. angin       — angin kencang lokal Petir
+    "ch_h":   30,  # CH harian          — korelasi tertinggi (0.459) vs severity
+    "cum3":   25,  # Kumulatif 3 hr     — antecedent rainfall PVMBG
+    "cum7":   20,  # Kumulatif 7 hr     — soil saturation Van Westen
+    "rh_air":  8,  # Kelembaban udara   — Crozier (1999)
+    "sm":      7,  # Kelembaban tanah   — soil moisture Open-Meteo
+    "et0":     5,  # Evapotranspirasi   — defisit air tanah
+    "ws":      5,  # Kec. angin         — angin kencang lokal Petir
 }
 
-def hitung_indeks_risiko(ch_h, cum3, cum7, rh=80.0, et0=3.0, ws=2.0):
+def hitung_indeks_risiko(ch_h, cum3, cum7, rh_air=80.0, sm=0.30, et0=3.0, ws=2.0):
     """
     Indeks risiko longsor 0–100 berbasis data site-specific Desa Petir.
+    Parameter rh dipisah: rh_air (kelembaban udara) & sm (kelembaban tanah m³/m³).
     Validasi: Nov 2023 (2 meninggal) → 87.4 AWAS | Apr 2024 (Rp70jt) → 87.2 AWAS
     """
-    s_ch  = min(ch_h  / THRESHOLD["ch_h"]["awas"],  1.0) * RISIKO_WEIGHTS["ch_h"]
-    s_c3  = min(cum3  / THRESHOLD["cum3"]["awas"],  1.0) * RISIKO_WEIGHTS["cum3"]
-    s_c7  = min(cum7  / THRESHOLD["cum7"]["awas"],  1.0) * RISIKO_WEIGHTS["cum7"]
-    s_rh  = max(rh - 70, 0) / 20                        * RISIKO_WEIGHTS["rh"]
-    s_et0 = max(THRESHOLD["et0"]["waspada"] - et0, 0) / THRESHOLD["et0"]["waspada"] * RISIKO_WEIGHTS["et0"]
-    s_ws  = min(ws  / THRESHOLD["ws"]["awas"],  1.0) * RISIKO_WEIGHTS["ws"]
+    s_ch    = min(ch_h  / THRESHOLD["ch_h"]["awas"],    1.0) * RISIKO_WEIGHTS["ch_h"]
+    s_c3    = min(cum3  / THRESHOLD["cum3"]["awas"],    1.0) * RISIKO_WEIGHTS["cum3"]
+    s_c7    = min(cum7  / THRESHOLD["cum7"]["awas"],    1.0) * RISIKO_WEIGHTS["cum7"]
+    s_rh    = max(rh_air - 70, 0) / 20                      * RISIKO_WEIGHTS["rh_air"]
+    s_sm    = min(sm    / THRESHOLD["sm"]["awas"],      1.0) * RISIKO_WEIGHTS["sm"]
+    s_et0   = max(THRESHOLD["et0"]["waspada"] - et0, 0) / THRESHOLD["et0"]["waspada"] * RISIKO_WEIGHTS["et0"]
+    s_ws    = min(ws    / THRESHOLD["ws"]["awas"],      1.0) * RISIKO_WEIGHTS["ws"]
 
-    indeks = round(min(s_ch + s_c3 + s_c7 + s_rh + s_et0 + s_ws, 100), 1)
+    indeks = round(min(s_ch + s_c3 + s_c7 + s_rh + s_sm + s_et0 + s_ws, 100), 1)
 
     if indeks >= 70:   level, warna, emoji = "AWAS",    "#ef4444", "🔴"
     elif indeks >= 45: level, warna, emoji = "SIAGA",   "#f97316", "🟠"
@@ -111,7 +115,7 @@ def hitung_indeks_risiko(ch_h, cum3, cum7, rh=80.0, et0=3.0, ws=2.0):
     # Multi-variate override — kondisi gabungan
     if (ch_h >= THRESHOLD["ch_h"]["awas"] or
         cum3 >= THRESHOLD["cum3"]["awas"]  or
-        (ch_h >= THRESHOLD["ch_h"]["siaga"] and rh >= THRESHOLD["rh"]["siaga"] and
+        (ch_h >= THRESHOLD["ch_h"]["siaga"] and rh_air >= THRESHOLD["rh_air"]["siaga"] and
          et0 <= THRESHOLD["et0"]["siaga"])):
         if level not in ("AWAS",):
             level, warna, emoji = "AWAS", "#ef4444", "🔴"
@@ -120,10 +124,11 @@ def hitung_indeks_risiko(ch_h, cum3, cum7, rh=80.0, et0=3.0, ws=2.0):
     return {
         "indeks": indeks, "level": level, "warna": warna, "emoji": emoji,
         "skor": {"ch_h": round(s_ch,1), "cum3": round(s_c3,1),
-                 "cum7": round(s_c7,1), "rh": round(s_rh,1),
+                 "cum7": round(s_c7,1), "rh_air": round(s_rh,1),
+                 "sm": round(s_sm,1),
                  "et0": round(s_et0,1), "ws": round(s_ws,1)},
         "input": {"ch_h": ch_h, "cum3": cum3, "cum7": cum7,
-                  "rh": rh, "et0": et0, "ws": ws},
+                  "rh_air": rh_air, "sm": sm, "et0": et0, "ws": ws},
     }
 
 # ─── SUPABASE REALTIME CONFIG ────────────────────────────────────────────────
@@ -732,6 +737,124 @@ def check_and_alert(rainfall_1h: float):
         )
         send_telegram(msg)
         last_alert_level = {"level": level, "time": now}
+
+# ─── BACKGROUND SCHEDULER: PUSH PAGI/SORE TANPA BROWSER ──────────────────────
+# Thread daemon yang berjalan independen dari Dash callback.
+# Mengatasi masalah: push pagi tidak terkirim karena tidak ada yang buka dashboard.
+_bg_push_state = {
+    "pagi_sent": "",
+    "sore_sent": "",
+    "last_level": "",
+    "level_sent": "",
+}
+_bg_push_lock = threading.Lock()
+
+def _bg_buat_pesan_cuaca(judul, jam_label):
+    """Buat pesan cuaca untuk push notifikasi (dipakai oleh background scheduler)."""
+    try:
+        owm   = fetch_weather()
+        meteo = fetch_openmeteo()
+        bmkg  = fetch_bmkg()
+        tmrw  = fetch_tomorrow()
+        fused = fuse_data(owm, meteo, bmkg, tmrw)
+
+        temp  = fused.get("temp",     27.0)
+        hum   = fused.get("humidity", 80.0)
+        wind  = fused.get("wind",      2.0)
+        desc  = fused.get("bmkg_desc", "Berawan")
+
+        curr  = meteo.get("current", {}) if meteo else {}
+        daily = meteo.get("daily",   {}) if meteo else {}
+        et0_l = daily.get("et0_fao_evapotranspiration", [])
+        et0   = float(et0_l[0]) if et0_l else 3.0
+        uv    = curr.get("uv_index",  0)
+        pres  = curr.get("surface_pressure", 1013)
+        rh_om = curr.get("relative_humidity_2m", hum)
+
+        # Indeks risiko
+        d = get_risiko_inputs()
+        h = hitung_indeks_risiko(
+            d["ch_h"], d["cum3"], d["cum7"],
+            d["rh_air"], d["sm"], d["et0"], d["ws"]
+        )
+
+        now = now_wib()
+        today = now.strftime("%Y-%m-%d")
+        fcst_txt = desc
+
+        msg_parts = [
+            f"{judul}",
+            f"📅 {now.strftime('%A, %d %B %Y')} | {jam_label}",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+            "",
+            "🌤 <b>Kondisi Cuaca</b>",
+            f"   Suhu        : {temp:.1f}°C",
+            f"   Kelembaban  : {rh_om:.0f}%",
+            f"   Angin       : {wind:.1f} m/s",
+            f"   Tekanan     : {pres:.0f} hPa",
+            f"   UV Index    : {uv:.1f}",
+            f"   ET₀         : {et0:.2f} mm/hari",
+            f"   BMKG        : {desc}",
+            "",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+            f"{h['emoji']} <b>Indeks Risiko: {h['indeks']}/100 — {h['level']}</b>",
+            f"   CH Harian     : {d['ch_h']:.1f} mm [{d['ch_src']}]",
+            f"   Kum 3 Hari    : {d['cum3']:.1f} mm",
+            f"   Kum 7 Hari    : {d['cum7']:.1f} mm",
+            f"   Kelembaban Udara  : {d['rh_air']:.0f}%",
+            f"   Kelembaban Tanah  : {d['sm']:.3f} m³/m³",
+            "",
+            "📍 Desa Petir, Kec. Dramaga, Kab. Bogor",
+        ]
+
+        if h["level"] == "AWAS":
+            msg_parts += [
+                "",
+                "🚨 <b>PERHATIAN!</b> Risiko longsor TINGGI.",
+                "   Pantau kondisi lereng & siapkan jalur evakuasi.",
+            ]
+        elif h["level"] == "SIAGA":
+            msg_parts += ["", "⚠️ Risiko SEDANG. Pantau terus kondisi cuaca."]
+
+        return "\n".join(msg_parts)
+    except Exception as e:
+        return f"⚠️ Gagal mengambil data: {e}"
+
+def _bg_scheduler_loop():
+    """Background loop — cek setiap 30 detik, kirim push pagi/sore."""
+    print("🔄 Background push scheduler started (pagi 07:00 · sore 16:00 WIB)")
+    while True:
+        try:
+            now   = now_wib()
+            today = now.strftime("%Y-%m-%d")
+
+            with _bg_push_lock:
+                # ── PUSH PAGI 07:00 WIB ──
+                if now.hour == 7 and now.minute <= 2 and _bg_push_state["pagi_sent"] != today:
+                    print(f"🌅 [BG] Mengirim push pagi {today}...")
+                    msg = _bg_buat_pesan_cuaca(
+                        "🌅 <b>Selamat Pagi — Ringkasan Cuaca</b>", "07.00 WIB")
+                    if send_telegram(msg):
+                        _bg_push_state["pagi_sent"] = today
+                        print(f"✅ [BG] Push pagi terkirim: {today}")
+
+                # ── PUSH SORE 16:00 WIB ──
+                if now.hour == 16 and now.minute <= 2 and _bg_push_state["sore_sent"] != today:
+                    print(f"🌇 [BG] Mengirim push sore {today}...")
+                    msg = _bg_buat_pesan_cuaca(
+                        "🌇 <b>Update Sore — Kondisi Cuaca</b>", "16.00 WIB")
+                    if send_telegram(msg):
+                        _bg_push_state["sore_sent"] = today
+                        print(f"✅ [BG] Push sore terkirim: {today}")
+
+        except Exception as e:
+            print(f"❌ [BG] Scheduler error: {e}")
+
+        time.sleep(30)  # Cek setiap 30 detik
+
+# Start background scheduler sebagai daemon thread
+_bg_thread = threading.Thread(target=_bg_scheduler_loop, daemon=True)
+_bg_thread.start()
 
 # ─── HAZARD ZONES ──────────────────────────────────────────────────────────────
 hazard_zones = [
@@ -2974,8 +3097,9 @@ def get_risiko_inputs():
     """
     Ambil semua input hitung_indeks_risiko dari sumber real-time.
     Dipakai BERSAMA oleh dashboard callback DAN Telegram /risiko.
-    Sumber CH: Open-Meteo daily > OpenWeatherMap > Open-Meteo current
-    Sumber kumulatif: CHIRPS + Open-Meteo hybrid (jika CHIRPS < 14 hari)
+    Sumber CH: Weighted Average Open-Meteo 60% + Tomorrow.io 40%
+    Sumber kumulatif: Pure Open-Meteo (past_days=7)
+    Sumber kelembaban: rh_air (Open-Meteo) + sm (soil_moisture Open-Meteo)
     """
     try:
         meteo_data = fetch_openmeteo()
@@ -2985,15 +3109,34 @@ def get_risiko_inputs():
     curr  = meteo_data.get("current", {}) if meteo_data else {}
     daily = meteo_data.get("daily",   {}) if meteo_data else {}
 
-    rh    = float(curr.get("relative_humidity_2m") or 80.0)
-    ws    = float(curr.get("wind_speed_10m")        or 2.0)
-    et0_l = daily.get("et0_fao_evapotranspiration", [])
-    et0   = float(et0_l[0]) if et0_l else 3.0
+    rh_air = float(curr.get("relative_humidity_2m") or 80.0)
+    ws     = float(curr.get("wind_speed_10m")        or 2.0)
+    et0_l  = daily.get("et0_fao_evapotranspiration", [])
+    et0    = float(et0_l[0]) if et0_l else 3.0
 
-    # CH Harian: prioritas Open-Meteo daily > OWM > OM current
+    # ── Kelembaban Tanah (soil moisture) dari Open-Meteo ──────────────────
+    sm_0 = float(curr.get("soil_moisture_0_to_1cm")  or 0.30)
+    sm_1 = float(curr.get("soil_moisture_1_to_3cm")  or 0.30)
+    sm_3 = float(curr.get("soil_moisture_3_to_9cm")  or 0.30)
+    sm   = round((sm_0 + sm_1 + sm_3) / 3.0, 4)  # Rata-rata 0–9cm
+
+    # ── CH Harian: Weighted Average OM 60% + Tomorrow.io 40% ─────────────
     prec_arr    = daily.get("precipitation_sum", [])
     ch_om_today = float(prec_arr[-1] or 0) if prec_arr else 0.0
     ch_om_now   = float(curr.get("precipitation") or 0)
+
+    # Tomorrow.io rain intensity (mm/jam → estimasi harian)
+    ch_tmrw = 0.0
+    tmrw_ok = False
+    try:
+        tmrw_data = fetch_tomorrow()
+        if tmrw_data.get("ok"):
+            tmrw_ok = True
+            ch_tmrw = float(tmrw_data.get("rain", 0) or 0)
+    except Exception:
+        pass
+
+    # OWM sebagai fallback
     ch_owm = 0.0
     try:
         owm    = fetch_weather()
@@ -3001,57 +3144,32 @@ def get_risiko_inputs():
     except Exception:
         pass
 
-    if ch_om_today > 0:
+    # Weighted average CH harian
+    if ch_om_today > 0 and tmrw_ok and ch_tmrw > 0:
+        # OM 60% + Tomorrow.io 40%
+        ch_h    = round(ch_om_today * 0.6 + ch_tmrw * 0.4, 2)
+        ch_src  = "OM 60% + Tomorrow 40%"
+    elif ch_om_today > 0:
         ch_h, ch_src = ch_om_today, "Open-Meteo (daily)"
+    elif tmrw_ok and ch_tmrw > 0:
+        ch_h, ch_src = ch_tmrw, "Tomorrow.io"
     elif ch_owm > 0:
-        ch_h, ch_src = ch_owm,     "OpenWeatherMap"
+        ch_h, ch_src = ch_owm, "OpenWeatherMap"
     elif ch_om_now > 0:
-        ch_h, ch_src = ch_om_now,  "Open-Meteo (now)"
+        ch_h, ch_src = ch_om_now, "Open-Meteo (now)"
     else:
-        ch_h, ch_src = 0.0,        "–"
+        ch_h, ch_src = 0.0, "–"
 
-    # Kumulatif dari Open-Meteo (past_days=7 sudah diset di URL)
+    # ── Kumulatif dari Open-Meteo (past_days=7) ──────────────────────────
     # prec_arr: [H-7, H-6, H-5, H-4, H-3, H-2, H-1, H0, H+1, ...]
-    # 7 hari historis + hari ini + forecast → ambil 8 item terakhir dari historis
-    cum3_om = sum(float(x or 0) for x in prec_arr[:3]) if len(prec_arr) >= 3 else ch_h * 3
-    cum7_om = sum(float(x or 0) for x in prec_arr[:8]) if len(prec_arr) >= 7 else ch_h * 7
-
-    # Hybrid CHIRPS + Open-Meteo
-    df = get_hist_data(full=False)
-    chirps_last_date = None
-    cum3_ch = cum7_ch = 0.0
-    chirps_age_days = 999
-
-    if df is not None and len(df) > 0:
-        df_s = df.sort_values("date")
-        chirps_last_date = df_s.iloc[-1]["date"]
-        cum3_ch = float(df_s.tail(3)["rainfall"].sum())
-        cum7_ch = float(df_s.tail(7)["rainfall"].sum())
-        try:
-            from datetime import date as _dc
-            last_d = chirps_last_date.date() if hasattr(chirps_last_date, "date")                      else _dc.fromisoformat(str(chirps_last_date)[:10])
-            chirps_age_days = (now_wib().date() - last_d).days
-        except Exception:
-            pass
-
-    if chirps_age_days <= 14:
-        gap3 = min(chirps_age_days, 3)
-        gap7 = min(chirps_age_days, 7)
-        cum3 = cum3_ch + sum(float((prec_arr or [0])[i] or 0)
-                             for i in range(min(gap3, len(prec_arr))))
-        cum7 = cum7_ch + sum(float((prec_arr or [0])[i] or 0)
-                             for i in range(min(gap7, len(prec_arr))))
-        cum_src = f"CHIRPS+OM ({chirps_age_days}h gap)"
-    else:
-        cum3, cum7 = cum3_om, cum7_om
-        cum_src    = "Open-Meteo (CHIRPS lag)"
+    cum3 = sum(float(x or 0) for x in prec_arr[-4:-1]) if len(prec_arr) >= 4 else ch_h * 3
+    cum7 = sum(float(x or 0) for x in prec_arr[:8])    if len(prec_arr) >= 7 else ch_h * 7
+    cum_src = "Open-Meteo (past_days=7)"
 
     return {
-        "ch_h": ch_h,  "cum3": cum3,  "cum7": cum7,
-        "rh":   rh,    "et0":  et0,   "ws":   ws,
-        "ch_src": ch_src,  "cum_src": cum_src,
-        "chirps_date":      str(chirps_last_date)[:10] if chirps_last_date else "–",
-        "chirps_age_days":  chirps_age_days,
+        "ch_h": ch_h, "cum3": cum3, "cum7": cum7,
+        "rh_air": rh_air, "sm": sm, "et0": et0, "ws": ws,
+        "ch_src": ch_src, "cum_src": cum_src,
     }
 
 # ─── CALLBACK: HITUNG INDEKS RISIKO ──────────────────────────────────────────
@@ -3066,26 +3184,23 @@ def update_risiko_store(_, meteo_data, fused_data):
     try:
         # Gunakan fungsi bersama agar dashboard dan Telegram bot pakai data sama
         d = get_risiko_inputs()
-        ch_h = d["ch_h"]; cum3 = d["cum3"]; cum7 = d["cum7"]
-        rh   = d["rh"];   et0  = d["et0"];  ws   = d["ws"]
+        ch_h   = d["ch_h"]; cum3 = d["cum3"]; cum7 = d["cum7"]
+        rh_air = d["rh_air"]; sm = d["sm"]
+        et0    = d["et0"];  ws   = d["ws"]
 
         # Fallback meteo dari fused jika Open-Meteo gagal
-        if rh == 80.0 and fused_data:
-            rh = float(fused_data.get("humidity") or 80.0)
+        if rh_air == 80.0 and fused_data:
+            rh_air = float(fused_data.get("humidity") or 80.0)
         if ws == 2.0 and fused_data:
             ws = float(fused_data.get("wind") or 2.0)
 
-        ch_src      = d["ch_src"]
-        cum_src     = d["cum_src"]
-        chirps_age  = d["chirps_age_days"]
-        chirps_date = d["chirps_date"]
+        ch_src  = d["ch_src"]
+        cum_src = d["cum_src"]
 
-        hasil = hitung_indeks_risiko(ch_h, cum3, cum7, rh, et0, ws)
+        hasil = hitung_indeks_risiko(ch_h, cum3, cum7, rh_air, sm, et0, ws)
         hasil["updated_at"]  = now_wib().strftime("%d %b %Y %H:%M WIB")
         hasil["ch_src"]      = ch_src
         hasil["cum_src"]     = cum_src
-        hasil["chirps_age"]  = chirps_age
-        hasil["chirps_date"] = chirps_date
 
         # Kirim Telegram jika AWAS (throttle: max 1x per 3 jam)
         if hasil["level"] == "AWAS":
@@ -3097,7 +3212,8 @@ def update_risiko_store(_, meteo_data, fused_data):
                     f"🌧 CH Harian     : <b>{ch_h:.1f} mm</b> (threshold ≥{THRESHOLD['ch_h']['awas']} mm)\n"
                     f"📊 Kum 3 Hari   : <b>{cum3:.1f} mm</b> (threshold ≥{THRESHOLD['cum3']['awas']} mm)\n"
                     f"📊 Kum 7 Hari   : <b>{cum7:.1f} mm</b> (threshold ≥{THRESHOLD['cum7']['awas']} mm)\n"
-                    f"💧 Kelembaban    : <b>{rh:.0f}%</b> (threshold ≥{THRESHOLD['rh']['awas']}%)\n"
+                    f"💧 Kelem. Udara  : <b>{rh_air:.0f}%</b> (threshold ≥{THRESHOLD['rh_air']['awas']}%)\n"
+                    f"🌱 Kelem. Tanah  : <b>{sm:.3f} m³/m³</b> (threshold ≥{THRESHOLD['sm']['awas']})\n"
                     f"🌿 ET₀          : <b>{et0:.2f} mm/hari</b>\n"
                     f"💨 Angin        : <b>{ws:.1f} m/s</b>\n"
                     f"⏰ {hasil['updated_at']}\n"
@@ -3200,12 +3316,13 @@ def update_risiko_display(data):
 
     # ── Bars kontribusi parameter ──────────────────────────────────────────
     param_labels = {
-        "ch_h": ("🌧 CH Harian",     RISIKO_WEIGHTS["ch_h"]),
-        "cum3": ("📊 Kum 3 Hari",    RISIKO_WEIGHTS["cum3"]),
-        "cum7": ("📊 Kum 7 Hari",    RISIKO_WEIGHTS["cum7"]),
-        "rh":   ("💧 Kelembaban",    RISIKO_WEIGHTS["rh"]),
-        "et0":  ("🌿 ET₀",           RISIKO_WEIGHTS["et0"]),
-        "ws":   ("💨 Kec. Angin",    RISIKO_WEIGHTS["ws"]),
+        "ch_h":   ("🌧 CH Harian",        RISIKO_WEIGHTS["ch_h"]),
+        "cum3":   ("📊 Kum 3 Hari",       RISIKO_WEIGHTS["cum3"]),
+        "cum7":   ("📊 Kum 7 Hari",       RISIKO_WEIGHTS["cum7"]),
+        "rh_air": ("💧 Kelem. Udara",     RISIKO_WEIGHTS["rh_air"]),
+        "sm":     ("🌱 Kelem. Tanah",     RISIKO_WEIGHTS["sm"]),
+        "et0":    ("🌿 ET₀",              RISIKO_WEIGHTS["et0"]),
+        "ws":     ("💨 Kec. Angin",       RISIKO_WEIGHTS["ws"]),
     }
     bars = []
     for key, (label, bobot) in param_labels.items():
@@ -3241,12 +3358,13 @@ def update_risiko_display(data):
         ], style={"marginBottom":"6px","display":"flex","alignItems":"center"})
 
     params_div = html.Div([
-        _param_row("🌧","CH Harian",   inp.get("ch_h",0),"mm",    27, 29, 42),
-        _param_row("📊","Kum 3 Hari",  inp.get("cum3",0),"mm",    40, 75, 110),
-        _param_row("📊","Kum 7 Hari",  inp.get("cum7",0),"mm",    131,173,205),
-        _param_row("💧","Kelembaban",  inp.get("rh",80), "%",     75, 85, 90),
-        _param_row("🌿","ET₀",         inp.get("et0",3), "mm/hr", 3.5,2.5,1.5, invert=True),
-        _param_row("💨","Kec. Angin",  inp.get("ws",2),  "m/s",   3,  6,  9),
+        _param_row("🌧","CH Harian",    inp.get("ch_h",0),   "mm",      27, 29, 42),
+        _param_row("📊","Kum 3 Hari",   inp.get("cum3",0),   "mm",      40, 75, 110),
+        _param_row("📊","Kum 7 Hari",   inp.get("cum7",0),   "mm",      131,173,205),
+        _param_row("💧","Kelem. Udara", inp.get("rh_air",80),"%",       75, 85, 90),
+        _param_row("🌱","Kelem. Tanah", inp.get("sm",0.30),  "m³/m³",   0.30,0.38,0.45),
+        _param_row("🌿","ET₀",          inp.get("et0",3),   "mm/hr",   3.5,2.5,1.5, invert=True),
+        _param_row("💨","Kec. Angin",   inp.get("ws",2),    "m/s",     3,  6,  9),
         html.Hr(style={"borderColor":"#1e293b","margin":"8px 0"}),
         html.Div([
             html.Span("🟢 Normal: <20  ",  style={"fontSize":"8px","color":"#22c55e"}),
@@ -3257,13 +3375,8 @@ def update_risiko_display(data):
     ])
 
     # Info sumber data
-    ch_src      = data.get("ch_src",     "–")
-    cum_src     = data.get("cum_src",    "–")
-    chirps_date = data.get("chirps_date","–")
-    chirps_age  = data.get("chirps_age", 999)
-
-    age_color = "#22c55e" if chirps_age <= 3 else "#eab308" if chirps_age <= 14 else "#ef4444"
-    age_label = f"{chirps_age} hari lalu" if chirps_age < 999 else "–"
+    ch_src  = data.get("ch_src",  "–")
+    cum_src = data.get("cum_src", "–")
 
     updated_text = html.Div([
         html.Div([
@@ -3278,9 +3391,7 @@ def update_risiko_display(data):
             html.Span(cum_src, style={"fontSize":"9px","color":"#38bdf8","fontWeight":"600"}),
         ]),
         html.Div([
-            html.Span("🛰 CHIRPS terakhir: ", style={"fontSize":"9px","color":"#475569"}),
-            html.Span(chirps_date, style={"fontSize":"9px","color":age_color,"fontWeight":"600"}),
-            html.Span(f" ({age_label})", style={"fontSize":"9px","color":age_color}),
+            html.Span("📡 Sumber: Real-time API (OM + Tomorrow.io + OWM)", style={"fontSize":"9px","color":"#475569"}),
         ]),
     ])
     return fig, badge, bars, params_div, updated_text
@@ -3332,7 +3443,7 @@ def notif_otomatis(_, risiko_data, state):
             d = get_risiko_inputs()
             h = hitung_indeks_risiko(
                 d["ch_h"], d["cum3"], d["cum7"],
-                d["rh"],   d["et0"],  d["ws"]
+                d["rh_air"], d["sm"], d["et0"], d["ws"]
             )
 
             # Prakiraan BMKG hari ini
@@ -3366,9 +3477,11 @@ def notif_otomatis(_, risiko_data, state):
                 "",
                 "━━━━━━━━━━━━━━━━━━━━━━",
                 f"{h['emoji']} <b>Indeks Risiko: {h['indeks']}/100 — {h['level']}</b>",
-                f"   CH Harian  : {d['ch_h']:.1f} mm [{d['ch_src']}]",
-                f"   Kum 3 Hari : {d['cum3']:.1f} mm",
-                f"   Kum 7 Hari : {d['cum7']:.1f} mm",
+                f"   CH Harian       : {d['ch_h']:.1f} mm [{d['ch_src']}]",
+                f"   Kum 3 Hari      : {d['cum3']:.1f} mm",
+                f"   Kum 7 Hari      : {d['cum7']:.1f} mm",
+                f"   Kelem. Udara    : {d['rh_air']:.0f}%",
+                f"   Kelem. Tanah    : {d['sm']:.3f} m³/m³",
                 "",
                 "📍 Desa Petir, Kec. Dramaga, Kab. Bogor",
             ]
@@ -3409,12 +3522,18 @@ def notif_otomatis(_, risiko_data, state):
     level_baru = risiko_data.get("level", "")
     level_lama = state.get("last_level", "")
 
-    # Update last_level meski tidak kirim notif
+    # Saat startup (level_lama kosong), set level awal tanpa kirim notif
+    if not level_lama:
+        if level_baru:
+            state["last_level"] = level_baru
+        return state
+
+    # Update last_level
     if level_baru:
         state["last_level"] = level_baru
 
-    # Hanya proses jika ada perubahan dan level_lama sudah pernah diset
-    if not level_baru or not level_lama or level_baru == level_lama:
+    # Hanya proses jika ada perubahan level
+    if not level_baru or level_baru == level_lama:
         return state
 
     # Throttle: max 1 notif perubahan per 30 menit
@@ -3461,7 +3580,8 @@ def notif_otomatis(_, risiko_data, state):
         f"🌧 CH Harian     : {inp.get('ch_h', 0):.1f} mm",
         f"📊 Kum 3 Hari   : {inp.get('cum3', 0):.1f} mm",
         f"📊 Kum 7 Hari   : {inp.get('cum7', 0):.1f} mm",
-        f"💧 Kelembaban    : {inp.get('rh', 0):.0f}%",
+        f"💧 Kelem. Udara  : {inp.get('rh_air', 80):.0f}%",
+        f"🌱 Kelem. Tanah  : {inp.get('sm', 0.30):.3f} m³/m³",
         f"🌿 ET₀          : {inp.get('et0', 0):.2f} mm/hari",
         f"💨 Angin        : {inp.get('ws', 0):.1f} m/s",
         f"━━━━━━━━━━━━━━━━━━━━━━",
@@ -3619,19 +3739,20 @@ def _handle_tg_command(chat_id, text):
             d = get_risiko_inputs()
             h = hitung_indeks_risiko(
                 d["ch_h"], d["cum3"], d["cum7"],
-                d["rh"],   d["et0"],  d["ws"]
+                d["rh_air"], d["sm"], d["et0"], d["ws"]
             )
             _tg_send(chat_id,
                 f"{h['emoji']} <b>Indeks Risiko Longsor: {h['indeks']}/100 — {h['level']}</b>\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"🌧 CH Harian   : <b>{d['ch_h']:.1f} mm</b> [{d['ch_src']}]\n"
-                f"📊 Kum 3 Hari  : <b>{d['cum3']:.1f} mm</b>\n"
-                f"📊 Kum 7 Hari  : <b>{d['cum7']:.1f} mm</b> [{d['cum_src']}]\n"
-                f"💧 Kelembaban  : <b>{d['rh']:.0f}%</b>\n"
-                f"🌿 ET₀         : <b>{d['et0']:.2f} mm/hari</b>\n"
-                f"💨 Kec. Angin  : <b>{d['ws']:.1f} m/s</b>\n"
+                f"🌧 CH Harian    : <b>{d['ch_h']:.1f} mm</b> [{d['ch_src']}]\n"
+                f"📊 Kum 3 Hari   : <b>{d['cum3']:.1f} mm</b>\n"
+                f"📊 Kum 7 Hari   : <b>{d['cum7']:.1f} mm</b> [{d['cum_src']}]\n"
+                f"💧 Kelem. Udara : <b>{d['rh_air']:.0f}%</b>\n"
+                f"🌱 Kelem. Tanah : <b>{d['sm']:.3f} m³/m³</b>\n"
+                f"🌿 ET₀          : <b>{d['et0']:.2f} mm/hari</b>\n"
+                f"💨 Kec. Angin   : <b>{d['ws']:.1f} m/s</b>\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"🛰 CHIRPS: {d['chirps_date']} ({d['chirps_age_days']} hari lalu)\n"
+                f"📡 Sumber: Real-time API (OM + Tomorrow.io + OWM)\n"
                 f"🟢 Normal &lt;20 | 🟡 Waspada 20–45 | 🟠 Siaga 45–70 | 🔴 Awas &gt;70"
             )
         except Exception as e:
