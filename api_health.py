@@ -124,6 +124,15 @@ def check_chirps():
     r["desc"] = "Data CH harian"
     return r
 
+def check_tomorrow():
+    """Cek koneksi Tomorrow.io API."""
+    import os as _os
+    key = _os.getenv("TOMORROW_API_KEY", "")
+    if not key:
+        return _skip("Tomorrow.io", "API key belum diset")
+    url = f"https://api.tomorrow.io/v4/weather/realtime?location=-6.6121,106.7231&apikey={key}&units=metric"
+    return _check("Tomorrow.io", url, timeout=10)
+
 def check_supabase():
     if not SUPABASE_URL or SUPABASE_URL == "YOUR_SUPABASE_URL":
         return _skip("Supabase", "URL belum diset")
@@ -152,6 +161,7 @@ def check_all_apis() -> dict:
         "bmkg_prakiraan": check_bmkg_prakiraan(),
         "bmkg_cap":       check_bmkg_cap(),
         "chirps":         check_chirps(),
+        "tomorrow":       check_tomorrow(),
         "supabase":       check_supabase(),
         "telegram":       check_telegram(),
     }
