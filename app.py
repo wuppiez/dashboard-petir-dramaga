@@ -922,6 +922,71 @@ app = dash.Dash(
     title="Dashboard Hidrometeorologi – Desa Petir",
 )
 
+# ─── RESPONSIVE CSS ────────────────────────────────────────────────────────────
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+<head>
+    {%metas%}
+    <title>{%title%}</title>
+    {%favicon%}
+    {%css%}
+    <style>
+        /* ── Mobile (< 768px) ─────────────────────────────── */
+        @media (max-width: 767px) {
+            .responsive-grid-4 {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 12px !important;
+            }
+            .responsive-flex-row {
+                flex-direction: column !important;
+            }
+            .responsive-panel {
+                min-width: unset !important;
+                flex: unset !important;
+                width: 100% !important;
+            }
+            .responsive-header {
+                flex-direction: column !important;
+                text-align: center !important;
+                gap: 12px !important;
+            }
+            .responsive-header > div {
+                text-align: center !important;
+            }
+            .responsive-footer {
+                font-size: 10px !important;
+            }
+            .metric-value {
+                font-size: 22px !important;
+            }
+        }
+        /* ── Tablet (768px - 1024px) ──────────────────────── */
+        @media (min-width: 768px) and (max-width: 1024px) {
+            .responsive-grid-4 {
+                grid-template-columns: repeat(3, 1fr) !important;
+            }
+            .responsive-panel {
+                min-width: 280px !important;
+            }
+        }
+        /* ── Smooth transitions ───────────────────────────── */
+        .responsive-panel, .responsive-grid-4, .responsive-flex-row {
+            transition: all 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    {%app_entry%}
+    <footer>
+        {%config%}
+        {%scripts%}
+        {%renderer%}
+    </footer>
+</body>
+</html>
+'''
+
 # ─── HELPER: CARD METRIC ───────────────────────────────────────────────────────
 def metric_card(icon, label, value_id, unit, color="#2196F3"):
     return html.Div([
@@ -995,7 +1060,8 @@ app.layout = html.Div([
                 html.Div(id="alert-badge",
                          style={"marginTop": "4px", "textAlign": "right"}),
             ]),
-        ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center",
+        ], className="responsive-header",
+           style={"display": "flex", "justifyContent": "space-between", "alignItems": "center",
                   "maxWidth": "1600px", "margin": "0 auto"}),
     ], style={
         "background": "rgba(15, 23, 42, 0.8)", "backdropFilter": "blur(16px)",
@@ -1074,7 +1140,8 @@ app.layout = html.Div([
                         html.Div("📡 BMKG", style={"fontSize":"12px","color":"#94a3b8","marginBottom":"4px"}),
                         html.Div(id="fused-bmkg-desc", style={"fontSize":"16px","fontWeight":"700","color":"#38bdf8"}),
                     ]),
-                ], style={"display":"grid","gridTemplateColumns":"repeat(4, 1fr)","gap":"20px","marginBottom":"24px"}),
+                ], className="responsive-grid-4",
+                   style={"display":"grid","gridTemplateColumns":"repeat(4, 1fr)","gap":"20px","marginBottom":"24px"}),
 
                 html.Div([
                     html.Div([
@@ -1111,7 +1178,8 @@ app.layout = html.Div([
                         html.Span(" %", style={"fontSize":"12px","color":"#475569"}),
                     ]),
                 ], style={"display":"flex","flexDirection":"column","gap":"12px","paddingTop":"16px","borderTop":"1px solid rgba(255,255,255,0.05)"}),
-            ], style={
+            ], className="responsive-panel",
+               style={
                 "background": "rgba(15, 23, 42, 0.4)",
                 "backdropFilter": "blur(16px)",
                 "borderRadius": "20px",
@@ -1144,7 +1212,8 @@ app.layout = html.Div([
                 center=[LAT, LON], zoom=13,
                 style={"height": "340px", "borderRadius": "16px", "border": "1px solid rgba(255,255,255,0.05)"}, id="main-map"),
 
-            ], style={
+            ], className="responsive-panel",
+               style={
                 "background": "rgba(15, 23, 42, 0.4)",
                 "backdropFilter": "blur(16px)",
                 "borderRadius": "20px",
@@ -1155,7 +1224,8 @@ app.layout = html.Div([
                 "boxShadow": "0 20px 40px rgba(0,0,0,0.3)"
             }),
 
-        ], style={"display": "flex", "gap": "24px", "marginBottom": "24px", "flexWrap": "wrap"}),
+        ], className="responsive-flex-row",
+           style={"display": "flex", "gap": "24px", "marginBottom": "24px", "flexWrap": "wrap"}),
 
         # ── ROW 2: PRAKIRAAN 7 HARI & KEL. TANAH ──────────────────────────────
         html.Div([
@@ -1167,7 +1237,8 @@ app.layout = html.Div([
                 html.H3("🌱 Kelembaban Tanah", style={"color":"#f8fafc","margin":"0 0 20px","fontSize":"16px","fontWeight":"600"}),
                 dcc.Graph(id="chart-soil-moisture", config={"displayModeBar": False}, style={"height":"220px"}),
             ], style={"background": "rgba(15, 23, 42, 0.4)", "backdropFilter": "blur(16px)", "borderRadius": "20px", "padding": "32px", "flex": "1", "minWidth": "300px", "border": "1px solid rgba(255,255,255,0.05)", "boxShadow": "0 20px 40px rgba(0,0,0,0.3)"}),
-        ], style={"display": "flex", "gap": "24px", "marginBottom": "24px", "flexWrap": "wrap"}),
+        ], className="responsive-flex-row",
+           style={"display": "flex", "gap": "24px", "marginBottom": "24px", "flexWrap": "wrap"}),
 
         # ── ROW RISIKO: INDEKS RISIKO LONGSOR ──────────────────────────────────
         html.Div([
@@ -1368,52 +1439,50 @@ app.layout = html.Div([
             "padding": "32px", "marginBottom": "24px",
         }),
 
-                # ── TELEGRAM PANEL ──────────────────────────────────────────────────
+                # ── TELEGRAM PANEL (Tes Koneksi Only) ─────────────────────────────
         html.Div([
-            html.H3("📨 Kirim Notifikasi Telegram Manual",
+            html.H3("📨 Status Koneksi Telegram",
                     style={"color": "#f8fafc", "margin": "0 0 12px", "fontSize": "15px", "fontWeight": "600"}),
+            html.P("Tekan tombol di bawah untuk memverifikasi bahwa bot Telegram terhubung dan siap mengirim notifikasi otomatis.",
+                   style={"color": "#94a3b8", "fontSize": "13px", "margin": "0 0 16px", "lineHeight": "1.5"}),
+            # Hidden textarea (Dash callback still needs this ID)
+            dcc.Textarea(id="telegram-msg", value="", style={"display": "none"}),
             html.Div([
-                dcc.Textarea(
-                    id="telegram-msg",
-                    placeholder="Tulis pesan notifikasi...",
-                    value="",
-                    style={"width": "100%", "height": "80px", "background": "#0f172a",
-                           "color": "#f1f5f9", "border": "1px solid #1e40af", "borderRadius": "8px",
-                           "padding": "10px", "resize": "vertical"},
-                ),
-                html.Div([
-                    html.Button("📨 Kirim Pesan", id="btn-send-telegram",
-                                n_clicks=0,
-                                style={"background": "#1d4ed8", "color": "white",
-                                       "border": "none", "borderRadius": "8px",
-                                       "padding": "10px 20px", "cursor": "pointer",
-                                       "fontWeight": "600", "fontSize": "13px",
-                                       "transition": "opacity 0.2s"}),
-                    html.Button("✅ Tes Koneksi", id="btn-test-telegram",
-                                n_clicks=0,
-                                style={"background": "#065f46", "color": "white",
-                                       "border": "none", "borderRadius": "8px",
-                                       "padding": "10px 20px", "cursor": "pointer",
-                                       "fontWeight": "600", "fontSize": "13px",
-                                       "transition": "opacity 0.2s"}),
-                    html.Div(id="telegram-status",
-                             style={"fontSize": "13px", "color": "#94a3b8",
-                                    "padding": "6px 0"}),
-                ], style={"display": "flex", "gap": "10px", "alignItems": "center",
-                          "marginTop": "10px", "flexWrap": "wrap"}),
-            ]),
+                # Hidden send button (Dash callback still needs this ID)
+                html.Button("📨 Kirim Pesan", id="btn-send-telegram",
+                            n_clicks=0, style={"display": "none"}),
+                html.Button("✅ Tes Koneksi Bot", id="btn-test-telegram",
+                            n_clicks=0,
+                            style={"background": "#065f46", "color": "white",
+                                   "border": "none", "borderRadius": "8px",
+                                   "padding": "10px 24px", "cursor": "pointer",
+                                   "fontWeight": "600", "fontSize": "13px",
+                                   "transition": "opacity 0.2s"}),
+                html.Div(id="telegram-status",
+                         style={"fontSize": "13px", "color": "#94a3b8",
+                                "padding": "6px 0"}),
+            ], style={"display": "flex", "gap": "10px", "alignItems": "center",
+                      "flexWrap": "wrap"}),
         ], style={
             "background": "rgba(15, 23, 42, 0.4)", "backdropFilter": "blur(16px)", "border": "1px solid rgba(255, 255, 255, 0.05)", "boxShadow": "0 20px 40px rgba(0,0,0,0.3)",
-
             "borderRadius": "20px",
             "padding": "32px",
             "marginBottom": "24px",
         }),
 
         # FOOTER
-        html.Div(
-            f"Dashboard Hidrometeorologi Desa Petir © 2025 | Data CHIRPS | Diperbarui otomatis setiap 30 detik",
-            style={"textAlign": "center", "fontSize": "12px", "color": "#475569", "paddingBottom": "12px"}
+        html.Div([
+            html.Div(
+                "Dashboard Hidrometeorologi Desa Petir © 2025 | Diperbarui otomatis setiap 30 detik",
+                style={"color": "#cbd5e1", "fontWeight": "500", "marginBottom": "6px"}
+            ),
+            html.Div(
+                "Sumber Data: BMKG · OpenWeatherMap · Open-Meteo · Tomorrow.io · NASA POWER · CHIRPS · InaRISK BNPB · BIG",
+                style={"color": "#64748b"}
+            ),
+        ], className="responsive-footer",
+           style={"textAlign": "center", "fontSize": "12px", "paddingBottom": "16px", "paddingTop": "8px",
+                  "borderTop": "1px solid rgba(255,255,255,0.05)", "marginTop": "8px"}
         ),
 
     ], style={"maxWidth": "1600px", "margin": "0 auto", "padding": "16px 20px"}),
@@ -3642,9 +3711,8 @@ def _handle_tg_command(chat_id, text):
                 f"💧 Kelembaban: <b>{hum:.0f}%</b>\n"
                 f"🌧️ CH       : <b>{rain:.1f} mm</b>\n"
                 f"💨 Angin    : <b>{wind:.1f} m/s</b>\n"
-                f"🌤️ BMKG     : {desc}\n"
-                f"━━━━━━━━━━━━━━━━\n"
-                f"<i>Fused: BMKG 50% · OWM 30% · Open-Meteo 20%</i>"
+                f"🌤️ Kondisi  : {desc}\n"
+                f"━━━━━━━━━━━━━━━━"
             )
         except Exception as e:
             _tg_send(chat_id, f"❌ Gagal mengambil data: {e}")
@@ -3673,7 +3741,7 @@ def _handle_tg_command(chat_id, text):
                 f"🌿 ET₀        : <b>{et0:.2f} mm/hari</b>\n"
                 f"💦 Titik Embun : <b>{dew:.1f}°C</b>\n"
                 f"☁️ Awan        : <b>{cld}%</b>\n"
-                f"📡 BMKG        : {fused.get('bmkg_desc','Berawan')}"
+                f"🌤️ Kondisi     : {fused.get('bmkg_desc','Berawan')}"
             )
         except Exception as e:
             _tg_send(chat_id, f"❌ Gagal mengambil data: {e}")
@@ -3715,15 +3783,14 @@ def _handle_tg_command(chat_id, text):
             _tg_send(chat_id,
                 f"{h['emoji']} <b>Indeks Risiko Longsor: {h['indeks']}/100 — {h['level']}</b>\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"🌧 CH Harian    : <b>{d['ch_h']:.1f} mm</b> [{d['ch_src']}]\n"
+                f"🌧 CH Harian    : <b>{d['ch_h']:.1f} mm</b>\n"
                 f"📊 Kum 3 Hari   : <b>{d['cum3']:.1f} mm</b>\n"
-                f"📊 Kum 7 Hari   : <b>{d['cum7']:.1f} mm</b> [{d['cum_src']}]\n"
+                f"📊 Kum 7 Hari   : <b>{d['cum7']:.1f} mm</b>\n"
                 f"💧 Kelem. Udara : <b>{d['rh_air']:.0f}%</b>\n"
                 f"🌱 Kelem. Tanah : <b>{d['sm']:.3f} m³/m³</b>\n"
                 f"🌿 ET₀          : <b>{d['et0']:.2f} mm/hari</b>\n"
                 f"💨 Kec. Angin   : <b>{d['ws']:.1f} m/s</b>\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"📡 Sumber: Real-time API (OM + Tomorrow.io + OWM)\n"
                 f"🟢 Normal &lt;20 | 🟡 Waspada 20–45 | 🟠 Siaga 45–70 | 🔴 Awas &gt;70"
             )
         except Exception as e:
