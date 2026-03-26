@@ -937,7 +937,7 @@ def metric_card(icon, label, value_id, unit, color="#2196F3"):
     ], style={
         "background": "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
         "border": f"1px solid {color}33",
-        "borderRadius": "12px",
+        "borderRadius": "20px",
         "padding": "16px 20px",
         "flex": "1",
         "minWidth": "140px",
@@ -981,14 +981,14 @@ app.layout = html.Div([
     html.Div([
         html.Div([
             html.Div([
-                html.I(className="fa fa-cloud-rain", style={"fontSize": "32px", "color": "#38bdf8"}),
+                html.I(className="fa fa-cloud-rain", style={"fontSize": "32px", "color": "#f8fafc"}),
                 html.Div([
                     html.H1("Dashboard Informasi Cuaca",
                             style={"margin": "0", "fontSize": "22px", "fontWeight": "700", "color": "#f1f5f9"}),
                     html.P(f"📍 {LOCATION_NAME}",
                            style={"margin": "0", "fontSize": "13px", "color": "#64748b"}),
                 ]),
-            ], style={"display": "flex", "alignItems": "center", "gap": "16px"}),
+            ], style={"display": "flex", "alignItems": "center", "gap": "24px"}),
             html.Div([
                 html.Div(id="header-datetime",
                          style={"fontSize": "14px", "color": "#64748b", "textAlign": "right"}),
@@ -998,9 +998,9 @@ app.layout = html.Div([
         ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center",
                   "maxWidth": "1600px", "margin": "0 auto"}),
     ], style={
-        "background": "linear-gradient(90deg, #0f172a 0%, #1e293b 100%)",
+        "background": "rgba(15, 23, 42, 0.8)", "backdropFilter": "blur(16px)",
         "padding": "16px 24px",
-        "borderBottom": "2px solid #1d4ed8",
+        "borderBottom": "1px solid rgba(255, 255, 255, 0.05)",
         "boxShadow": "0 4px 20px rgba(0,0,0,0.4)",
     }),
 
@@ -1011,400 +1011,163 @@ app.layout = html.Div([
     html.Div([
 
         # ── SUMBER DATA & COPYRIGHT ────────────────────────────────────────────
+
+        # (Dipindahkan ke footer / disembunyikan agar layout lebih bersih)
         html.Div([
-            html.Div([
-                html.Span("📡 Sumber Data: ", style={"color": "#64748b", "fontSize": "11px"}),
-                html.Span("OpenWeatherMap", style={"color": "#38bdf8", "fontSize": "11px", "fontWeight": "600"}),
-                html.Span(" · ", style={"color": "#475569"}),
-                html.Span("Open-Meteo", style={"color": "#10b981", "fontSize": "11px", "fontWeight": "600"}),
-                html.Span(" · ", style={"color": "#475569"}),
-                html.Span("© BMKG", style={"color": "#f59e0b", "fontSize": "11px", "fontWeight": "600"}),
-                html.Span(" · ", style={"color": "#475569"}),
-                html.Span("NASA CHIRPS", style={"color": "#8b5cf6", "fontSize": "11px", "fontWeight": "600"}),
-                html.Span(" · ", style={"color": "#475569"}),
-                html.Span("Supabase", style={"color": "#22c55e", "fontSize": "11px", "fontWeight": "600"}),
-            ]),
-            html.Div([
-                html.Span("⚠️ Data peringatan dini oleh ", style={"color": "#64748b", "fontSize": "10px"}),
-                html.A("© BMKG – Badan Meteorologi, Klimatologi, dan Geofisika",
-                       href="https://www.bmkg.go.id", target="_blank",
-                       style={"color": "#f59e0b", "fontSize": "10px", "textDecoration": "none"}),
-                html.Span(" | Data CAP: ", style={"color": "#64748b", "fontSize": "10px"}),
-                html.A("github.com/infoBMKG/data-cap",
-                       href="https://github.com/infoBMKG/data-cap", target="_blank",
-                       style={"color": "#64748b", "fontSize": "10px"}),
-            ]),
-        ], style={
-            "display": "flex", "justifyContent": "space-between", "alignItems": "center",
-            "background": "#0f172a", "border": "1px solid #1e293b",
-            "borderRadius": "8px", "padding": "8px 16px",
-            "marginBottom": "12px", "flexWrap": "wrap", "gap": "8px",
-        }),
+            html.Div(id="weather-description"), html.Div(id="weather-feelslike"),
+            html.Div(id="cw-temp"), html.Div(id="cw-rh"), html.Div(id="cw-rain"),
+            html.Div(id="cw-wind"), html.Div(id="cw-pres"), html.Div(id="cw-uv"),
+            html.Div(id="cw-soil"), html.Div(id="cw-updated")
+        ], style={"display": "none"}),
 
-        # ROW 1 metric individual dihapus — digabung ke panel cuaca terpadu di bawah
-
-        # ── PANEL CUACA TERPADU (Data Fusion + Open-Meteo compact) ────────────
+        # ── ROW 1: CUACA TERPADU & PETA (Kini Berdampingan) ────────────────────
         html.Div([
+            # Panel Kiri: Cuaca Terpadu Lengkap
             html.Div([
-                # Header
                 html.Div([
-                    html.Span("🔀 Cuaca Terpadu",
-                              style={"fontSize":"13px","fontWeight":"700","color":"#38bdf8"}),
-                    html.Span(" — Weighted Average (BMKG 40% · OWM 20% · Open-Meteo 20% · Tomorrow.io 20%)",
-                              style={"fontSize":"10px","color":"#475569"}),
-                    html.Div(id="fusion-sources-badge",
-                             style={"marginLeft":"auto"}),
-                ], style={"display":"flex","alignItems":"center","gap":"8px",
-                          "marginBottom":"14px","flexWrap":"wrap"}),
+                    html.Span("🔀 Cuaca Terpadu", style={"fontSize":"18px","fontWeight":"700","color":"#f8fafc"}),
+                    html.Span(" (BMKG, OWM, Open-Meteo, Tomorrow.io)", style={"fontSize":"12px","color":"#94a3b8"}),
+                    html.Div(id="fusion-sources-badge", style={"marginLeft":"auto"}),
+                ], style={"display":"flex","alignItems":"center","marginBottom":"24px","flexWrap":"wrap"}),
 
-                # Cards row — 1 baris 8 parameter
                 html.Div([
-                    # Suhu
                     html.Div([
-                        html.Div("🌡 Suhu", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Span(id="fused-temp", style={"fontSize":"24px","fontWeight":"800","color":"#ef4444"}),
-                        html.Span(" °C", style={"fontSize":"11px","color":"#64748b"}),
+                        html.Div("🌡 Suhu", style={"fontSize":"12px","color":"#94a3b8","marginBottom":"4px"}),
+                        html.Span(id="fused-temp", style={"fontSize":"28px","fontWeight":"700","color":"#ffffff"}),
+                        html.Span(" °C", style={"fontSize":"13px","color":"#94a3b8"}),
                         html.Div(id="fused-temp-breakdown", style={"display":"none"}),
-                    ], style={"flex":"1","minWidth":"100px","padding":"12px","background":"#0f172a",
-                              "borderRadius":"10px","border":"1px solid #ef444433"}),
-                    # Kelembaban
+                    ]),
                     html.Div([
-                        html.Div("💧 Kelembaban", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Span(id="fused-humidity", style={"fontSize":"24px","fontWeight":"800","color":"#3b82f6"}),
-                        html.Span(" %", style={"fontSize":"11px","color":"#64748b"}),
+                        html.Div("💧 Kelembaban", style={"fontSize":"12px","color":"#94a3b8","marginBottom":"4px"}),
+                        html.Span(id="fused-humidity", style={"fontSize":"28px","fontWeight":"700","color":"#ffffff"}),
+                        html.Span(" %", style={"fontSize":"13px","color":"#94a3b8"}),
                         html.Div(id="fused-humidity-breakdown", style={"display":"none"}),
-                    ], style={"flex":"1","minWidth":"100px","padding":"12px","background":"#0f172a",
-                              "borderRadius":"10px","border":"1px solid #3b82f633"}),
-                    # CH
+                    ]),
                     html.Div([
-                        html.Div("🌧 CH", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Span(id="fused-rain", style={"fontSize":"24px","fontWeight":"800","color":"#06b6d4"}),
-                        html.Span(" mm", style={"fontSize":"11px","color":"#64748b"}),
+                        html.Div("🌧 CH Harian", style={"fontSize":"12px","color":"#94a3b8","marginBottom":"4px"}),
+                        html.Span(id="fused-rain", style={"fontSize":"28px","fontWeight":"700","color":"#0ea5e9"}),
+                        html.Span(" mm", style={"fontSize":"13px","color":"#94a3b8"}),
                         html.Div(id="fused-rain-breakdown", style={"display":"none"}),
-                    ], style={"flex":"1","minWidth":"100px","padding":"12px","background":"#0f172a",
-                              "borderRadius":"10px","border":"1px solid #06b6d433"}),
-                    # Angin
+                    ]),
                     html.Div([
-                        html.Div("💨 Angin", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Span(id="fused-wind", style={"fontSize":"24px","fontWeight":"800","color":"#8b5cf6"}),
-                        html.Span(" m/s", style={"fontSize":"11px","color":"#64748b"}),
+                        html.Div("💨 Angin", style={"fontSize":"12px","color":"#94a3b8","marginBottom":"4px"}),
+                        html.Span(id="fused-wind", style={"fontSize":"28px","fontWeight":"700","color":"#ffffff"}),
+                        html.Span(" m/s", style={"fontSize":"13px","color":"#94a3b8"}),
                         html.Div(id="fused-wind-breakdown", style={"display":"none"}),
-                    ], style={"flex":"1","minWidth":"100px","padding":"12px","background":"#0f172a",
-                              "borderRadius":"10px","border":"1px solid #8b5cf633"}),
-                    # Tekanan
+                    ]),
                     html.Div([
-                        html.Div("🔵 Tekanan", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Div([
-                            html.Span(id="val-pressure", style={"fontSize":"22px","fontWeight":"800","color":"#f59e0b"}),
-                            html.Span(" hPa", style={"fontSize":"11px","color":"#64748b"}),
-                        ]),
-                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
-                              "borderRadius":"10px","border":"1px solid #f59e0b33"}),
-                    # UV
+                        html.Div("🔵 Tekanan", style={"fontSize":"12px","color":"#94a3b8","marginBottom":"4px"}),
+                        html.Span(id="val-pressure", style={"fontSize":"20px","fontWeight":"700","color":"#e2e8f0"}),
+                        html.Span(" hPa", style={"fontSize":"12px","color":"#94a3b8"}),
+                    ]),
                     html.Div([
-                        html.Div("☀️ UV Index", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Div([
-                            html.Span(id="val-uv", style={"fontSize":"22px","fontWeight":"800","color":"#eab308"}),
-                        ]),
-                        html.Div(id="val-uv-status", style={"fontSize":"9px","marginTop":"4px"}),
-                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
-                              "borderRadius":"10px","border":"1px solid #eab30833"}),
-                    # ET0
+                        html.Div("☀️ Indeks UV", style={"fontSize":"12px","color":"#94a3b8","marginBottom":"4px"}),
+                        html.Span(id="val-uv", style={"fontSize":"20px","fontWeight":"700","color":"#e2e8f0"}),
+                        html.Div(id="val-uv-status", style={"fontSize":"11px","marginTop":"4px","color":"#eab308"}),
+                    ]),
                     html.Div([
-                        html.Div("🌿 ET₀", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Div([
-                            html.Span(id="val-et0", style={"fontSize":"22px","fontWeight":"800","color":"#10b981"}),
-                            html.Span(" mm/hari", style={"fontSize":"11px","color":"#64748b"}),
-                        ]),
-                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
-                              "borderRadius":"10px","border":"1px solid #10b98133"}),
-                    # Kondisi BMKG
+                        html.Div("🌿 ET₀", style={"fontSize":"12px","color":"#94a3b8","marginBottom":"4px"}),
+                        html.Span(id="val-et0", style={"fontSize":"20px","fontWeight":"700","color":"#e2e8f0"}),
+                        html.Span(" mm/hri", style={"fontSize":"12px","color":"#94a3b8"}),
+                    ]),
                     html.Div([
-                        html.Div("📡 BMKG", style={"fontSize":"10px","color":"#94a3b8","marginBottom":"4px"}),
-                        html.Div(id="fused-bmkg-desc",
-                                 style={"fontSize":"13px","fontWeight":"700","color":"#38bdf8","lineHeight":"1.4"}),
-                        html.A("© BMKG", href="https://data.bmkg.go.id/prakiraan-cuaca/",
-                               target="_blank",
-                               style={"fontSize":"9px","color":"#f59e0b","textDecoration":"none"}),
-                    ], style={"flex":"1","minWidth":"100px","padding":"10px","background":"#0f172a",
-                              "borderRadius":"10px","border":"1px solid #10b98133"}),
-                ], style={"display":"flex","gap":"8px","flexWrap":"wrap"}),
+                        html.Div("📡 BMKG", style={"fontSize":"12px","color":"#94a3b8","marginBottom":"4px"}),
+                        html.Div(id="fused-bmkg-desc", style={"fontSize":"16px","fontWeight":"700","color":"#38bdf8"}),
+                    ]),
+                ], style={"display":"grid","gridTemplateColumns":"repeat(4, 1fr)","gap":"20px","marginBottom":"24px"}),
 
-                # Row 2 — Tanah compact
                 html.Div([
                     html.Div([
-                        html.Span("🌱 Suhu Tanah: ", style={"fontSize":"10px","color":"#64748b"}),
-                        html.Span(id="val-soil-temp-0", style={"fontSize":"11px","fontWeight":"700","color":"#f97316"}),
-                        html.Span(" °C (0cm) | ", style={"fontSize":"10px","color":"#334155"}),
-                        html.Span(id="val-soil-temp-6", style={"fontSize":"11px","fontWeight":"700","color":"#f59e0b"}),
-                        html.Span(" °C (6cm) | ", style={"fontSize":"10px","color":"#334155"}),
-                        html.Span(id="val-soil-temp-18", style={"fontSize":"11px","fontWeight":"700","color":"#eab308"}),
-                        html.Span(" °C (18cm)", style={"fontSize":"10px","color":"#334155"}),
-                    ], style={"flex":"1"}),
+                        html.Span("🌱 Suhu Tanah: ", style={"fontSize":"12px","color":"#64748b"}),
+                        html.Span(id="val-soil-temp-0", style={"fontSize":"13px","fontWeight":"600","color":"#cbd5e1"}),
+                        html.Span(" °C (0cm) | ", style={"fontSize":"12px","color":"#475569"}),
+                        html.Span(id="val-soil-temp-6", style={"fontSize":"13px","fontWeight":"600","color":"#cbd5e1"}),
+                        html.Span(" °C (6cm) | ", style={"fontSize":"12px","color":"#475569"}),
+                        html.Span(id="val-soil-temp-18", style={"fontSize":"13px","fontWeight":"600","color":"#cbd5e1"}),
+                        html.Span(" °C (18cm)", style={"fontSize":"12px","color":"#475569"}),
+                    ]),
                     html.Div([
-                        html.Span("💦 Kelembaban Tanah: ", style={"fontSize":"10px","color":"#64748b"}),
-                        html.Span(id="val-soil-moist-0", style={"fontSize":"11px","fontWeight":"700","color":"#38bdf8"}),
-                        html.Span(id="val-soil-moist-0-status", style={"fontSize":"9px","color":"#475569"}),
-                        html.Span(" m³/m³ (0-1cm) | ", style={"fontSize":"10px","color":"#334155"}),
-                        html.Span(id="val-soil-moist-1", style={"fontSize":"11px","fontWeight":"700","color":"#06b6d4"}),
-                        html.Span(id="val-soil-moist-1-status", style={"fontSize":"9px","color":"#475569"}),
-                        html.Span(" m³/m³ (1-3cm) | ", style={"fontSize":"10px","color":"#334155"}),
-                        html.Span(id="val-soil-moist-3", style={"fontSize":"11px","fontWeight":"700","color":"#3b82f6"}),
-                        html.Span(id="val-soil-moist-3-status", style={"fontSize":"9px","color":"#475569"}),
-                        html.Span(" m³/m³ (3-9cm)", style={"fontSize":"10px","color":"#334155"}),
-                    ], style={"flex":"1"}),
+                        html.Span("💦 Kelembaban Tanah: ", style={"fontSize":"12px","color":"#64748b"}),
+                        html.Span(id="val-soil-moist-0", style={"fontSize":"13px","fontWeight":"600","color":"#cbd5e1"}),
+                        html.Span(id="val-soil-moist-0-status", style={"display":"none"}),
+                        html.Span(" m³/m³ (0-1) | ", style={"fontSize":"12px","color":"#475569"}),
+                        html.Span(id="val-soil-moist-1", style={"fontSize":"13px","fontWeight":"600","color":"#cbd5e1"}),
+                        html.Span(id="val-soil-moist-1-status", style={"display":"none"}),
+                        html.Span(" m³/m³ (1-3) | ", style={"fontSize":"12px","color":"#475569"}),
+                        html.Span(id="val-soil-moist-3", style={"fontSize":"13px","fontWeight":"600","color":"#cbd5e1"}),
+                        html.Span(id="val-soil-moist-3-status", style={"display":"none"}),
+                        html.Span(" m³/m³ (3-9)", style={"fontSize":"12px","color":"#475569"}),
+                    ]),
                     html.Div([
-                        html.Span("💨 Arah Angin: ", style={"fontSize":"10px","color":"#64748b"}),
-                        html.Span(id="val-wind-dir", style={"fontSize":"11px","fontWeight":"700","color":"#8b5cf6"}),
-                        html.Span("° ", style={"fontSize":"10px","color":"#334155"}),
-                        html.Span(id="val-wind-dir-label", style={"fontSize":"10px","color":"#64748b"}),
-                        html.Span(" | 🌫 Titik Embun: ", style={"fontSize":"10px","color":"#64748b"}),
-                        html.Span(id="val-dewpoint", style={"fontSize":"11px","fontWeight":"700","color":"#a78bfa"}),
-                        html.Span(" °C", style={"fontSize":"10px","color":"#334155"}),
-                        html.Span(" | ☁️ Awan: ", style={"fontSize":"10px","color":"#64748b"}),
-                        html.Span(id="val-cloud", style={"fontSize":"11px","fontWeight":"700","color":"#94a3b8"}),
-                        html.Span(" %", style={"fontSize":"10px","color":"#334155"}),
-                    ], style={"flex":"1"}),
-                ], style={"display":"flex","gap":"16px","flexWrap":"wrap",
-                          "marginTop":"10px","padding":"8px 0",
-                          "borderTop":"1px solid #1e293b"}),
+                        html.Span("💨 Arah Angin: ", style={"fontSize":"12px","color":"#64748b"}),
+                        html.Span(id="val-wind-dir", style={"fontSize":"13px","fontWeight":"600","color":"#cbd5e1"}),
+                        html.Span("° ", style={"fontSize":"12px","color":"#475569"}),
+                        html.Span(id="val-wind-dir-label", style={"fontSize":"12px","color":"#475569"}),
+                        html.Span(" | 🌫 Titik Embun: ", style={"fontSize":"12px","color":"#64748b"}),
+                        html.Span(id="val-dewpoint", style={"fontSize":"13px","fontWeight":"600","color":"#cbd5e1"}),
+                        html.Span(" °C | ", style={"fontSize":"12px","color":"#475569"}),
+                        html.Span("☁️ Awan: ", style={"fontSize":"12px","color":"#64748b"}),
+                        html.Span(id="val-cloud", style={"fontSize":"13px","fontWeight":"600","color":"#cbd5e1"}),
+                        html.Span(" %", style={"fontSize":"12px","color":"#475569"}),
+                    ]),
+                ], style={"display":"flex","flexDirection":"column","gap":"12px","paddingTop":"16px","borderTop":"1px solid rgba(255,255,255,0.05)"}),
             ], style={
-                "background":"linear-gradient(135deg, #1e293b, #0f172a)",
-                "border":"2px solid #1d4ed8",
-                "borderRadius":"12px","padding":"16px 20px",
-                "boxShadow":"0 4px 24px rgba(29,78,216,0.2)",
-            }),
-        ], style={"marginBottom":"16px"}),
-
-                # ── ROW 1C: PRAKIRAAN TERPADU ──────────────────────────────────────
-        html.Div([
-            html.Div([
-                html.H3("📅 Prakiraan 7 Hari",
-                        style={"color":"#38bdf8","margin":"0 0 10px","fontSize":"14px","fontWeight":"600"}),
-                dcc.Graph(id="chart-openmeteo-daily", config={"displayModeBar": False},
-                          style={"height":"200px"}),
-            ], style={
-                "background":"linear-gradient(135deg, #1e293b, #0f172a)",
-                "border":"1px solid #1e40af33","borderRadius":"12px",
-                "padding":"16px","flex":"2","minWidth":"300px",
-            }),
-            html.Div([
-                html.H3("🌱 Kelembaban Tanah 24 Jam",
-                        style={"color":"#38bdf8","margin":"0 0 10px","fontSize":"14px","fontWeight":"600"}),
-                dcc.Graph(id="chart-soil-moisture", config={"displayModeBar": False},
-                          style={"height":"200px"}),
-            ], style={
-                "background":"linear-gradient(135deg, #1e293b, #0f172a)",
-                "border":"1px solid #1e40af33","borderRadius":"12px",
-                "padding":"16px","flex":"1","minWidth":"260px",
-            }),
-        ], style={"display":"flex","gap":"12px","marginBottom":"16px","flexWrap":"wrap"}),
-
-                # ── ROW 2: KONDISI & MAP ────────────────────────────────────────────
-        html.Div([
-
-            # Panel kiri: kondisi cuaca terkini (dinamis)
-            html.Div([
-                html.Div("🌤 Kondisi Cuaca Terkini",
-                         style={"fontSize":"14px","fontWeight":"700","color":"#38bdf8","marginBottom":"12px"}),
-
-                # Deskripsi + feels like (dari OWM)
-                html.Div(id="weather-description",
-                         style={"fontSize":"20px","fontWeight":"700","color":"#f1f5f9","marginBottom":"4px"}),
-                html.Div(id="weather-feelslike",
-                         style={"fontSize":"12px","color":"#94a3b8","marginBottom":"14px"}),
-
-                # Grid 2×3 — parameter cuaca utama
-                html.Div([
-                    # Baris 1
-                    html.Div([
-                        html.Div("🌡 Suhu",   style={"fontSize":"10px","color":"#64748b"}),
-                        html.Div(id="cw-temp", style={"fontSize":"16px","fontWeight":"700","color":"#ef4444"}),
-                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
-                              "padding":"10px","border":"1px solid #ef444422"}),
-                    html.Div([
-                        html.Div("💧 Kelembaban", style={"fontSize":"10px","color":"#64748b"}),
-                        html.Div(id="cw-rh",    style={"fontSize":"16px","fontWeight":"700","color":"#38bdf8"}),
-                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
-                              "padding":"10px","border":"1px solid #38bdf822"}),
-                    html.Div([
-                        html.Div("🌧 CH", style={"fontSize":"10px","color":"#64748b"}),
-                        html.Div(id="cw-rain",  style={"fontSize":"16px","fontWeight":"700","color":"#06b6d4"}),
-                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
-                              "padding":"10px","border":"1px solid #06b6d422"}),
-                ], style={"display":"flex","gap":"8px","marginBottom":"8px"}),
-                html.Div([
-                    html.Div([
-                        html.Div("💨 Angin",   style={"fontSize":"10px","color":"#64748b"}),
-                        html.Div(id="cw-wind",  style={"fontSize":"16px","fontWeight":"700","color":"#8b5cf6"}),
-                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
-                              "padding":"10px","border":"1px solid #8b5cf622"}),
-                    html.Div([
-                        html.Div("🔵 Tekanan", style={"fontSize":"10px","color":"#64748b"}),
-                        html.Div(id="cw-pres",  style={"fontSize":"16px","fontWeight":"700","color":"#f59e0b"}),
-                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
-                              "padding":"10px","border":"1px solid #f59e0b22"}),
-                    html.Div([
-                        html.Div("☀️ UV",      style={"fontSize":"10px","color":"#64748b"}),
-                        html.Div(id="cw-uv",    style={"fontSize":"16px","fontWeight":"700","color":"#eab308"}),
-                    ], style={"flex":"1","background":"#0f172a","borderRadius":"8px",
-                              "padding":"10px","border":"1px solid #eab30822"}),
-                ], style={"display":"flex","gap":"8px","marginBottom":"10px"}),
-
-                # Suhu tanah compact
-                html.Div([
-                    html.Span("🌱 Tanah: ", style={"fontSize":"10px","color":"#64748b"}),
-                    html.Span(id="cw-soil", style={"fontSize":"10px","color":"#f97316","fontWeight":"600"}),
-                ], style={"marginBottom":"8px"}),
-
-                # Sumber + waktu update
-                html.Div(id="cw-updated",
-                         style={"fontSize":"9px","color":"#334155","marginTop":"auto"}),
-            ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #1e40af33",
-                "borderRadius": "12px",
-                "padding": "16px 18px",
-                "flex": "1",
-                "minWidth": "280px",
-                "display": "flex",
-                "flexDirection": "column",
+                "background": "rgba(15, 23, 42, 0.4)",
+                "backdropFilter": "blur(16px)",
+                "borderRadius": "20px",
+                "padding": "32px",
+                "flex": "1.2",
+                "minWidth": "380px",
+                "border": "1px solid rgba(255, 255, 255, 0.05)",
+                "boxShadow": "0 20px 40px rgba(0,0,0,0.3)"
             }),
 
-            # Panel kanan: peta
+            # Panel Kanan: Peta
             html.Div([
                 html.Div([
-                    html.H3("🗺 Peta Rawan Bencana Hidrometeorologi",
-                            style={"color": "#38bdf8", "margin": "0",
-                                   "fontSize": "15px", "fontWeight": "600"}),
-                    # Layer toggle buttons
+                    html.H3("🗺 Peta Bencana", style={"color": "#f8fafc", "margin": "0", "fontSize": "16px", "fontWeight": "600"}),
                     html.Div([
-                        html.Button("🏔️ Longsor", id="btn-layer-longsor",
-                                    n_clicks=1,
-                                    style={"background": "#ef444433", "color": "#ef4444",
-                                           "border": "1px solid #ef4444",
-                                           "borderRadius": "6px", "padding": "3px 10px",
-                                           "cursor": "pointer", "fontSize": "11px",
-                                           "fontWeight": "600"}),
-                        html.Button("🌊 Banjir", id="btn-layer-banjir",
-                                    n_clicks=1,
-                                    style={"background": "#3b82f633", "color": "#3b82f6",
-                                           "border": "1px solid #3b82f6",
-                                           "borderRadius": "6px", "padding": "3px 10px",
-                                           "cursor": "pointer", "fontSize": "11px",
-                                           "fontWeight": "600"}),
-                        html.Button("⛈️ Cuaca Ekstrim", id="btn-layer-cuaca",
-                                    n_clicks=0,
-                                    style={"background": "#1e293b", "color": "#64748b",
-                                           "border": "1px solid #334155",
-                                           "borderRadius": "6px", "padding": "3px 10px",
-                                           "cursor": "pointer", "fontSize": "11px"}),
-                        html.Button("🏔️ Kemiringan Lereng", id="btn-layer-slope",
-                                    n_clicks=1,
-                                    style={"background": "#78716c33", "color": "#a8a29e",
-                                           "border": "1px solid #78716c",
-                                           "borderRadius": "6px", "padding": "3px 10px",
-                                           "cursor": "pointer", "fontSize": "11px",
-                                           "fontWeight": "600"}),
-                        html.Button("🏘️ Batas Desa", id="btn-layer-desa",
-                                    n_clicks=1,
-                                    style={"background": "#f59e0b33", "color": "#f59e0b",
-                                           "border": "1px solid #f59e0b",
-                                           "borderRadius": "6px", "padding": "3px 10px",
-                                           "cursor": "pointer", "fontSize": "11px",
-                                           "fontWeight": "600"}),
-
-                    ], style={"display": "flex", "gap": "6px", "flexWrap": "wrap"}),
-                ], style={"display": "flex", "justifyContent": "space-between",
-                          "alignItems": "center", "marginBottom": "10px",
-                          "flexWrap": "wrap", "gap": "8px"}),
+                        html.Button("Longsor", id="btn-layer-longsor", n_clicks=1, style={"background":"#ef4444","color":"#fff","border":"none","borderRadius":"8px","padding":"6px 14px","cursor":"pointer","fontSize":"12px","fontWeight":"600"}),
+                        html.Button("Banjir", id="btn-layer-banjir", n_clicks=1, style={"background":"#3b82f6","color":"#fff","border":"none","borderRadius":"8px","padding":"6px 14px","cursor":"pointer","fontSize":"12px","fontWeight":"600"}),
+                        html.Button("Cuaca Ekstrim", id="btn-layer-cuaca", n_clicks=0, style={"background":"rgba(255,255,255,0.05)","color":"#94a3b8","border":"1px solid rgba(255,255,255,0.1)","borderRadius":"8px","padding":"6px 14px","cursor":"pointer","fontSize":"12px"}),
+                        html.Button("Kemiringan", id="btn-layer-slope", n_clicks=1, style={"background":"#78716c","color":"#fff","border":"none","borderRadius":"8px","padding":"6px 14px","cursor":"pointer","fontSize":"12px","fontWeight":"600"}),
+                        html.Button("Batas Desa", id="btn-layer-desa", n_clicks=1, style={"background":"rgba(245, 158, 11, 0.2)","color":"#fbd38d","border":"1px solid #f59e0b","borderRadius":"8px","padding":"6px 14px","cursor":"pointer","fontSize":"12px"}),
+                    ], style={"display":"flex","gap":"8px","flexWrap":"wrap"}),
+                ], style={"display":"flex","justifyContent":"space-between","alignItems":"center","marginBottom":"20px","flexWrap":"wrap","gap":"12px"}),
 
                 dl.Map([
-                    # Basemap OpenStreetMap
-                    dl.TileLayer(
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-                        attribution="© <a href='https://openstreetmap.org/copyright'>OpenStreetMap</a>",
-                    ),
-                    # Layer Risiko Longsor (GeoJSON dari data BNPB InaRisk)
-                    dl.LayerGroup(id="layer-longsor"),
-                    # Layer Risiko Banjir (GeoJSON dari data BNPB InaRisk)
-                    dl.LayerGroup(id="layer-banjir"),
-                    # Layer Risiko Cuaca Ekstrim (default off)
-                    dl.LayerGroup(id="layer-cuaca-ekstrim"),
-                    # Layer kemiringan lereng (Puslittanak 2004)
-                    dl.LayerGroup(id="layer-slope"),
-                    # Layer batas desa dari BIG (diupdate via callback)
-                    dl.LayerGroup(id="layer-batas-desa"),
-
-                    # Marker lokasi Desa Petir
-                    dl.Marker(
-                        position=[LAT, LON],
-                        children=[
-                            dl.Tooltip("📍 Desa Petir, Kec. Dramaga"),
-                            dl.Popup(html.Div([
-                                html.B("📍 Desa Petir"),
-                                html.Br(),
-                                html.Span("Kec. Dramaga, Kab. Bogor"),
-                                html.Br(),
-                                html.Span(f"Koordinat: {LAT}, {LON}",
-                                          style={"fontSize": "11px", "color": "#64748b"}),
-                            ])),
-                        ],
-                    ),
+                    dl.TileLayer(url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", attribution="© OpenStreetMap, © CartoDB"),
+                    dl.LayerGroup(id="layer-longsor"), dl.LayerGroup(id="layer-banjir"), dl.LayerGroup(id="layer-cuaca-ekstrim"),
+                    dl.LayerGroup(id="layer-slope"), dl.LayerGroup(id="layer-batas-desa"),
+                    dl.Marker(position=[LAT, LON], children=[dl.Tooltip("Desa Petir")])
                 ],
                 center=[LAT, LON], zoom=13,
-                style={"height": "360px", "borderRadius": "8px"},
-                id="main-map"),
+                style={"height": "340px", "borderRadius": "16px", "border": "1px solid rgba(255,255,255,0.05)"}, id="main-map"),
 
-                # Legenda & Copyright
-                html.Div([
-                    html.Div([
-                        html.Span("■", style={"color": "#ef4444", "marginRight": "3px"}),
-                        html.Span("Longsor Tinggi", style={"marginRight": "10px"}),
-                        html.Span("■", style={"color": "#3b82f6", "marginRight": "3px"}),
-                        html.Span("Banjir Tinggi", style={"marginRight": "10px"}),
-                        html.Span("─", style={"color": "#f59e0b", "marginRight": "3px",
-                                              "fontWeight": "700"}),
-                        html.Span("Batas Desa", style={"marginRight": "10px"}),
-                        html.Span("■", style={"color": "#22c55e", "marginRight": "3px"}),
-                        html.Span("Datar", style={"marginRight": "6px"}),
-                        html.Span("■", style={"color": "#eab308", "marginRight": "3px"}),
-                        html.Span("Landai", style={"marginRight": "6px"}),
-                        html.Span("■", style={"color": "#f97316", "marginRight": "3px"}),
-                        html.Span("Agak Curam", style={"marginRight": "6px"}),
-                        html.Span("■", style={"color": "#ef4444", "marginRight": "3px"}),
-                        html.Span("Curam"),
-                    ], style={"fontSize": "11px", "color": "#94a3b8"}),
-                    html.Div([
-                        html.Span("© Sumber: ", style={"color": "#475569", "fontSize": "10px"}),
-                        html.A("BNPB InaRisk",
-                               href="https://inarisk.bnpb.go.id", target="_blank",
-                               style={"color": "#ef4444", "fontSize": "10px",
-                                      "textDecoration": "none"}),
-                        html.Span(" · ", style={"color": "#334155"}),
-                        html.A("BIG",
-                               href="https://geoservices.big.go.id", target="_blank",
-                               style={"color": "#f59e0b", "fontSize": "10px",
-                                      "textDecoration": "none"}),
-                        html.Span(" · ", style={"color": "#334155"}),
-                        html.A("OpenStreetMap",
-                               href="https://openstreetmap.org/copyright", target="_blank",
-                               style={"color": "#38bdf8", "fontSize": "10px",
-                                      "textDecoration": "none"}),
-                    ]),
-                ], style={"display": "flex", "justifyContent": "space-between",
-                          "alignItems": "center", "marginTop": "8px",
-                          "flexWrap": "wrap", "gap": "4px"}),
             ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #1e40af33",
-                "borderRadius": "12px",
-                "padding": "20px",
-                "flex": "2",
-                "minWidth": "400px",
+                "background": "rgba(15, 23, 42, 0.4)",
+                "backdropFilter": "blur(16px)",
+                "borderRadius": "20px",
+                "padding": "32px",
+                "flex": "1",
+                "minWidth": "380px",
+                "border": "1px solid rgba(255, 255, 255, 0.05)",
+                "boxShadow": "0 20px 40px rgba(0,0,0,0.3)"
             }),
 
-        ], style={"display": "flex", "gap": "16px", "marginBottom": "16px", "flexWrap": "wrap"}),
+        ], style={"display": "flex", "gap": "24px", "marginBottom": "24px", "flexWrap": "wrap"}),
+
+        # ── ROW 2: PRAKIRAAN 7 HARI & KEL. TANAH ──────────────────────────────
+        html.Div([
+            html.Div([
+                html.H3("📅 Prakiraan 7 Hari", style={"color":"#f8fafc","margin":"0 0 20px","fontSize":"16px","fontWeight":"600"}),
+                dcc.Graph(id="chart-openmeteo-daily", config={"displayModeBar": False}, style={"height":"220px"}),
+            ], style={"background": "rgba(15, 23, 42, 0.4)", "backdropFilter": "blur(16px)", "borderRadius": "20px", "padding": "32px", "flex": "2", "minWidth": "400px", "border": "1px solid rgba(255,255,255,0.05)", "boxShadow": "0 20px 40px rgba(0,0,0,0.3)"}),
+            html.Div([
+                html.H3("🌱 Kelembaban Tanah", style={"color":"#f8fafc","margin":"0 0 20px","fontSize":"16px","fontWeight":"600"}),
+                dcc.Graph(id="chart-soil-moisture", config={"displayModeBar": False}, style={"height":"220px"}),
+            ], style={"background": "rgba(15, 23, 42, 0.4)", "backdropFilter": "blur(16px)", "borderRadius": "20px", "padding": "32px", "flex": "1", "minWidth": "300px", "border": "1px solid rgba(255,255,255,0.05)", "boxShadow": "0 20px 40px rgba(0,0,0,0.3)"}),
+        ], style={"display": "flex", "gap": "24px", "marginBottom": "24px", "flexWrap": "wrap"}),
 
         # ── ROW RISIKO: INDEKS RISIKO LONGSOR ──────────────────────────────────
         html.Div([
@@ -1422,7 +1185,7 @@ app.layout = html.Div([
                                  style={"fontSize":"10px","color":"#475569","textAlign":"right"}),
                     ]),
                 ], style={"display":"flex","justifyContent":"space-between",
-                          "alignItems":"center","marginBottom":"16px","flexWrap":"wrap","gap":"8px"}),
+                          "alignItems":"center","marginBottom": "24px","flexWrap":"wrap","gap":"8px"}),
 
                 # Isi panel: gauge kiri + breakdown kanan
                 html.Div([
@@ -1465,12 +1228,12 @@ app.layout = html.Div([
                 ], style={"marginTop":"12px","paddingTop":"10px","borderTop":"1px solid #1e293b"}),
 
             ], style={
-                "background":"linear-gradient(135deg, #1e293b, #0f172a)",
-                "border":"1px solid #f59e0b44",
-                "borderRadius":"12px","padding":"20px",
+                "background": "rgba(15, 23, 42, 0.4)", "backdropFilter": "blur(16px)", "border": "1px solid rgba(255, 255, 255, 0.05)", "boxShadow": "0 20px 40px rgba(0,0,0,0.3)",
+                "border": "1px solid rgba(245, 158, 11, 0.2)",
+                "borderRadius": "20px","padding":"20px",
                 "boxShadow":"0 4px 24px rgba(245,158,11,0.1)",
             }),
-        ], style={"marginBottom":"16px"}),
+        ], style={"marginBottom": "24px"}),
 
 
         # ── ROW 4: TREN HISTORIS ────────────────────────────────────────────
@@ -1478,7 +1241,7 @@ app.layout = html.Div([
             html.Div([
                 html.Div([
                     html.H3(id="hist-title", children="📊 Analisis Tren Historis",
-                            style={"color": "#38bdf8", "margin": "0", "fontSize": "15px", "fontWeight": "600"}),
+                            style={"color": "#f8fafc", "margin": "0", "fontSize": "15px", "fontWeight": "600"}),
                     html.Div([
                         dcc.Dropdown(
                             id="hist-view",
@@ -1502,32 +1265,32 @@ app.layout = html.Div([
                             marks={y: str(y) for y in range(2005, 2027, 5)},
                             tooltip={"always_visible": False},
                         ),
-                    ], style={"display": "flex", "alignItems": "center", "gap": "16px", "flexWrap": "wrap"}),
+                    ], style={"display": "flex", "alignItems": "center", "gap": "24px", "flexWrap": "wrap"}),
                 ], style={"display": "flex", "justifyContent": "space-between",
                           "alignItems": "center", "marginBottom": "12px", "flexWrap": "wrap", "gap": "12px"}),
                 dcc.Graph(id="chart-historical", config={"displayModeBar": True},
-                          style={"height": "320px"}),
+                          style={"height": "300px"}),
             ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #1e40af33",
-                "borderRadius": "12px",
-                "padding": "20px",
+                "background": "rgba(15, 23, 42, 0.4)", "backdropFilter": "blur(16px)", "border": "1px solid rgba(255, 255, 255, 0.05)", "boxShadow": "0 20px 40px rgba(0,0,0,0.3)",
+
+                "borderRadius": "20px",
+                "padding": "32px",
                 "flex": "1",
             }),
-        ], style={"display": "flex", "gap": "16px", "marginBottom": "16px"}),
+        ], style={"display": "flex", "gap": "24px", "marginBottom": "24px"}),
 
         # ── ROW 5: STATISTIK RINGKASAN ──────────────────────────────────────
         html.Div([
             html.Div(id="stat-cards",
                      style={"display": "flex", "gap": "12px", "flexWrap": "wrap"}),
-        ], style={"marginBottom": "16px"}),
+        ], style={"marginBottom": "24px"}),
 
         # ── ROW NASA POWER: DATA MIKROMETEOROLOGI ──────────────────────────────
         html.Div([
             html.Div([
                 html.Div([
                     html.H3("🛰️ Data Mikrometeorologi Historis – NASA POWER",
-                            style={"color": "#38bdf8", "margin": "0",
+                            style={"color": "#f8fafc", "margin": "0",
                                    "fontSize": "15px", "fontWeight": "600"}),
                     html.Div([
                         dcc.Dropdown(
@@ -1555,7 +1318,7 @@ app.layout = html.Div([
                             tooltip={"always_visible": False},
                         ),
                     ], style={"display": "flex", "alignItems": "center",
-                              "gap": "16px", "flexWrap": "wrap"}),
+                              "gap": "24px", "flexWrap": "wrap"}),
                 ], style={"display": "flex", "justifyContent": "space-between",
                           "alignItems": "center", "marginBottom": "12px",
                           "flexWrap": "wrap", "gap": "12px"}),
@@ -1567,31 +1330,31 @@ app.layout = html.Div([
                     html.A("NASA POWER – Prediction Of Worldwide Energy Resources",
                            href="https://power.larc.nasa.gov",
                            target="_blank",
-                           style={"fontSize": "10px", "color": "#38bdf8",
+                           style={"fontSize": "10px", "color": "#f8fafc",
                                   "textDecoration": "none"}),
                     html.Span(" | Resolusi: Harian | Koordinat: -6.6121°S, 106.7231°E",
                               style={"fontSize": "10px", "color": "#475569"}),
                 ], style={"marginTop": "8px"}),
             ], style={
-                "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-                "border": "1px solid #1e40af33",
-                "borderRadius": "12px",
-                "padding": "20px",
+                "background": "rgba(15, 23, 42, 0.4)", "backdropFilter": "blur(16px)", "border": "1px solid rgba(255, 255, 255, 0.05)", "boxShadow": "0 20px 40px rgba(0,0,0,0.3)",
+
+                "borderRadius": "20px",
+                "padding": "32px",
                 "flex": "1",
             }),
-        ], style={"display": "flex", "gap": "16px", "marginBottom": "16px"}),
+        ], style={"display": "flex", "gap": "24px", "marginBottom": "24px"}),
 
         # ── ROW STATISTIK MICROMET ───────────────────────────────────────────
         html.Div([
             html.Div(id="micromet-stat-cards",
                      style={"display": "flex", "gap": "12px", "flexWrap": "wrap"}),
-        ], style={"marginBottom": "16px"}),
+        ], style={"marginBottom": "24px"}),
 
         # ── API HEALTH CHECK PANEL ─────────────────────────────────────────────
         html.Div([
             html.Div([
                 html.H3("🔍 Status API & Koneksi",
-                        style={"color": "#38bdf8", "margin": "0", "fontSize": "15px", "fontWeight": "600"}),
+                        style={"color": "#f8fafc", "margin": "0", "fontSize": "15px", "fontWeight": "600"}),
                 html.Div(id="health-overall-badge"),
             ], style={"display": "flex", "justifyContent": "space-between",
                       "alignItems": "center", "marginBottom": "14px"}),
@@ -1600,15 +1363,15 @@ app.layout = html.Div([
             html.Div(id="health-checked-at",
                      style={"fontSize": "11px", "color": "#475569", "marginTop": "10px"}),
         ], style={
-            "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-            "border": "1px solid #1e40af33", "borderRadius": "12px",
-            "padding": "20px", "marginBottom": "16px",
+            "background": "rgba(15, 23, 42, 0.4)", "backdropFilter": "blur(16px)", "border": "1px solid rgba(255, 255, 255, 0.05)", "boxShadow": "0 20px 40px rgba(0,0,0,0.3)",
+            "borderRadius": "20px",
+            "padding": "32px", "marginBottom": "24px",
         }),
 
                 # ── TELEGRAM PANEL ──────────────────────────────────────────────────
         html.Div([
             html.H3("📨 Kirim Notifikasi Telegram Manual",
-                    style={"color": "#38bdf8", "margin": "0 0 12px", "fontSize": "15px", "fontWeight": "600"}),
+                    style={"color": "#f8fafc", "margin": "0 0 12px", "fontSize": "15px", "fontWeight": "600"}),
             html.Div([
                 dcc.Textarea(
                     id="telegram-msg",
@@ -1640,11 +1403,11 @@ app.layout = html.Div([
                           "marginTop": "10px", "flexWrap": "wrap"}),
             ]),
         ], style={
-            "background": "linear-gradient(135deg, #1e293b, #0f172a)",
-            "border": "1px solid #1e40af33",
-            "borderRadius": "12px",
-            "padding": "20px",
-            "marginBottom": "16px",
+            "background": "rgba(15, 23, 42, 0.4)", "backdropFilter": "blur(16px)", "border": "1px solid rgba(255, 255, 255, 0.05)", "boxShadow": "0 20px 40px rgba(0,0,0,0.3)",
+
+            "borderRadius": "20px",
+            "padding": "32px",
+            "marginBottom": "24px",
         }),
 
         # FOOTER
@@ -3701,21 +3464,7 @@ def notif_otomatis(_, risiko_data, state):
         except Exception as e:
             return f"⚠️ Gagal mengambil data: {e}"
 
-    # ── 1. NOTIFIKASI PAGI — 07.00 WIB ──────────────────────────────────
-    if now.hour == 7 and now.minute <= 2 and state["pagi_sent"] != today:
-        msg = _buat_pesan_cuaca("🌅 <b>Selamat Pagi — Ringkasan Cuaca</b>", "07.00 WIB")
-        if send_telegram(msg):
-            state["pagi_sent"] = today
-            print(f"✅ Push pagi terkirim: {today}")
-        return state
-
-    # ── 2. NOTIFIKASI SORE — 16.00 WIB ──────────────────────────────────
-    if now.hour == 16 and now.minute <= 2 and state["sore_sent"] != today:
-        msg = _buat_pesan_cuaca("🌇 <b>Update Sore — Kondisi Cuaca</b>", "16.00 WIB")
-        if send_telegram(msg):
-            state["sore_sent"] = today
-            print(f"✅ Push sore terkirim: {today}")
-        return state
+    # Scheduled push pagi & sore ditangani secara eksklusif oleh _bg_scheduler_loop()
 
     # ── 3. NOTIFIKASI PERUBAHAN STATUS RISIKO ────────────────────────────
     if not risiko_data:
