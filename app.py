@@ -947,19 +947,19 @@ def metric_card(icon, label, value_id, unit, color="#2196F3"):
 # ─── LAYOUT ────────────────────────────────────────────────────────────────────
 app.layout = html.Div([
     dcc.Interval(id="interval-clock",    interval=1_000,   n_intervals=0),  # 1 detik
-    dcc.Interval(id="interval-weather",  interval=300_000, n_intervals=0),  # 5 menit
+    dcc.Interval(id="interval-weather",  interval=600_000, n_intervals=0),  # 10 menit
     dcc.Store(id="store-weather"),
     dcc.Store(id="store-openmeteo"),
     dcc.Store(id="store-bmkg"),
     dcc.Store(id="store-tomorrow"),
-    dcc.Interval(id="interval-tomorrow", interval=300_000, n_intervals=0),  # 5 menit
+    dcc.Interval(id="interval-tomorrow", interval=600_000, n_intervals=0),  # 10 menit
     dcc.Store(id="store-cap"),
     dcc.Store(id="store-health"),
     dcc.Store(id="store-micromet"),
     dcc.Interval(id="interval-micromet", interval=3_600_000, n_intervals=0),  # 1 jam
 
     dcc.Store(id="store-risiko"),
-    dcc.Interval(id="interval-risiko", interval=300_000, n_intervals=0),   # 5 menit
+    dcc.Interval(id="interval-risiko", interval=600_000, n_intervals=0),   # 10 menit
     dcc.Store(id="store-notif-harian", data={
         "pagi_sent":  "",   # YYYY-MM-DD terakhir kirim pagi
         "sore_sent":  "",   # YYYY-MM-DD terakhir kirim sore
@@ -970,6 +970,7 @@ app.layout = html.Div([
     dcc.Interval(id="interval-realtime", interval=30_000, n_intervals=0),  # 30 detik
     # map layers pakai file lokal (tidak perlu store/interval)
     dcc.Interval(id="interval-health", interval=300_000, n_intervals=0),  # 5 menit
+    dcc.Interval(id="interval-map",    interval=600_000, n_intervals=0),  # 10 menit
     dcc.Interval(id="interval-cap", interval=1_800_000, n_intervals=0),  # 30 menit
     dcc.Store(id="store-fused"),
 
@@ -3268,14 +3269,22 @@ def handle_telegram_buttons(n_send, n_test, msg_text):
     return ""
 
 # ─── FUNGSI BERSAMA: DATA INPUT INDEKS RISIKO ────────────────────────────────
+# Cache get_risiko_inputs — refresh max tiap 10 menit
+_risiko_inputs_cache    = {}
+_risiko_inputs_cache_ts = 0.0
+
 def get_risiko_inputs():
     """
     Ambil semua input hitung_indeks_risiko dari sumber real-time.
-    Dipakai BERSAMA oleh dashboard callback DAN Telegram /risiko.
-    Sumber CH: Weighted Average Open-Meteo 60% + Tomorrow.io 40%
-    Sumber kumulatif: Pure Open-Meteo (past_days=7)
-    Sumber kelembaban: rh_air (Open-Meteo) + sm (soil_moisture Open-Meteo)
+    Cache 10 menit agar tidak hit API berulang dari beberapa callback.
     """
+    global _risiko_inputs_cache, _risiko_inputs_cache_ts
+    import time as _time
+    now_ts = _time.time()
+    # Kembalikan cache jika masih segar (< 10 menit)
+    if _risiko_inputs_cache and (now_ts - _risiko_inputs_cache_ts) < 600:
+        return _risiko_inputs_cache
+
     try:
         meteo_data = fetch_openmeteo()
     except Exception:
