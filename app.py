@@ -915,6 +915,7 @@ def metric_card(icon, label, value_id, unit, color="#2196F3"):
 
 # ─── LAYOUT ────────────────────────────────────────────────────────────────────
 app.layout = html.Div([
+    dcc.Interval(id="interval-clock",    interval=1_000,   n_intervals=0),  # 1 detik
     dcc.Interval(id="interval-weather",  interval=300_000, n_intervals=0),  # 5 menit
     dcc.Store(id="store-weather"),
     dcc.Store(id="store-openmeteo"),
@@ -1744,6 +1745,67 @@ def update_cuaca_terkini(fused, meteo):
 def update_tomorrow_store(_):
     """Fetch Tomorrow.io setiap 5 menit (free tier: 25 call/jam)."""
     return fetch_tomorrow()
+
+# ─── CALLBACK: JAM & TANGGAL DINAMIS ─────────────────────────────────────────
+@app.callback(
+    [Output("header-datetime", "children"),
+     Output("alert-badge",     "children")],
+    Input("interval-clock", "n_intervals"),
+)
+def update_clock(_):
+    """Update jam & tanggal di header setiap detik."""
+    now  = now_wib()
+
+    # ── Jam digital ──────────────────────────────────────────────────────
+    clock = html.Div([
+        html.Span(
+            now.strftime("%H:%M:%S"),
+            style={
+                "fontSize":   "22px",
+                "fontWeight": "700",
+                "color":      "#38bdf8",
+                "fontFamily": "monospace",
+                "letterSpacing": "2px",
+            }
+        ),
+        html.Span(
+            " WIB",
+            style={"fontSize": "11px", "color": "#475569", "marginLeft": "4px"}
+        ),
+    ], style={"lineHeight": "1"})
+
+    # ── Hari & Tanggal ───────────────────────────────────────────────────
+    hari_id = {
+        "Monday":    "Senin",   "Tuesday":  "Selasa",
+        "Wednesday": "Rabu",    "Thursday": "Kamis",
+        "Friday":    "Jumat",   "Saturday": "Sabtu",
+        "Sunday":    "Minggu",
+    }
+    bulan_id = {
+        1:"Januari",  2:"Februari", 3:"Maret",    4:"April",
+        5:"Mei",      6:"Juni",     7:"Juli",      8:"Agustus",
+        9:"September",10:"Oktober",11:"November", 12:"Desember",
+    }
+    hari    = hari_id.get(now.strftime("%A"), now.strftime("%A"))
+    tanggal = now.day
+    bulan   = bulan_id.get(now.month, "")
+    tahun   = now.year
+
+    date_str = html.Div(
+        f"📅 {hari}, {tanggal} {bulan} {tahun}",
+        style={
+            "fontSize":  "12px",
+            "color":     "#64748b",
+            "marginTop": "3px",
+        }
+    )
+
+    datetime_block = html.Div([clock, date_str], style={"textAlign": "right"})
+
+    # ── Alert badge — kosongkan (tidak dipakai lagi) ─────────────────────
+    alert_badge = html.Div()
+
+    return datetime_block, alert_badge
 
 # ─── CALLBACK: UPDATE BMKG STORE ─────────────────────────────────────────────
 @app.callback(
