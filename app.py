@@ -447,6 +447,36 @@ def fetch_bmkg():
             ws_kmh = float(best_item.get("ws", 0) or 0)
             ws_ms  = round(ws_kmh / 3.6, 2)
 
+            # Susun data prakiraan harian (7 hari) dari raw cuaca_list
+            daily_forecast = []
+            seen_dates_bf  = set()
+            for periode in cuaca_list:
+                for item in (periode if isinstance(periode, list) else []):
+                    try:
+                        dt_str = item.get("local_datetime", "")[:10]
+                        if not dt_str or dt_str in seen_dates_bf:
+                            continue
+                        seen_dates_bf.add(dt_str)
+                        ws_i   = round(float(item.get("ws", 0) or 0) / 3.6, 2)
+                        daily_forecast.append({
+                            "date":         dt_str,
+                            "datetime":     item.get("local_datetime", ""),
+                            "t":            float(item.get("t",   28) or 28),
+                            "t_max":        float(item.get("t",   28) or 28),
+                            "t_min":        float(item.get("t",   24) or 24) - 4,
+                            "hu":           float(item.get("hu",  80) or 80),
+                            "ws":           ws_i,
+                            "wd":           item.get("wd", "S"),
+                            "weather_desc": item.get("weather_desc", "Berawan"),
+                            "weather_code": str(item.get("weather_code", "0")),
+                            "tcc":          float(item.get("tcc", 50) or 50),
+                            "vs_text":      item.get("vs_text", "-"),
+                        })
+                    except Exception:
+                        continue
+                if len(daily_forecast) >= 7:
+                    break
+
             return {
                 "temp":          float(best_item.get("t",   27.0) or 27.0),
                 "humidity":      float(best_item.get("hu",  80.0) or 80.0),
@@ -462,6 +492,7 @@ def fetch_bmkg():
                 "source_url":    "https://data.bmkg.go.id/prakiraan-cuaca/",
                 "area_code":     BMKG_AREA_CODE,
                 "ok":            True,
+                "daily":         daily_forecast,   # ← RAW prakiraan harian 7 hari
             }
 
     except Exception as e:
@@ -2134,77 +2165,159 @@ def update_openmeteo_cards(_, data):
     Input("store-bmkg", "data"),
 )
 def update_forecast_bmkg(bmkg_data):
-    """Prakiraan 7 hari dari BMKG saja (sumber resmi, kode 32.01.30.2005)."""
+    """
+    Prakiraan 7 hari dari data BMKG asli.
+    Pakai bmkg_data['daily'] yang sudah di-parse di fetch_bmkg().
+    Fallback ke Open-Meteo jika BMKG tidak tersedia.
+    """
     DARK = dict(
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#94a3b8", size=10),
-        margin=dict(l=40, r=20, t=20, b=50),
+        margin=dict(l=40, r=20, t=20, b=55),
         hovermode="x unified",
-        legend=dict(orientation="h", y=-0.4, font=dict(size=9)),
+        legend=dict(orientation="h", y=-0.45, font=dict(size=9)),
     )
-    fig = go.Figure()
-    times, ch, tmax, tmin = [], [], [], []
 
-    try:
-        if bmkg_data:
-            cuaca_list = bmkg_data.get("cuaca", [])
-            # Ambil 1 data per periode (tengah hari)
-            seen_dates = set()
-            for periode in cuaca_list:
-                for item in (periode if isinstance(periode, list) else []):
-                    try:
-                        dt_str = item.get("local_datetime","")[:10]
-                        if dt_str and dt_str not in seen_dates:
-                            seen_dates.add(dt_str)
-                            times.append(dt_str)
-                            tmax.append(float(item.get("t", 28) or 28))
-                            tmin.append(float(item.get("t", 24) or 24) - 4)
-                            # CH dari cuaca code
-                            wc = str(item.get("weather_code","0"))
-                            ch_val = 5.0 if wc in ["61","63","80","81"] else                                      2.0 if wc in ["51","53"] else 0.0
-                            ch.append(ch_val)
-                        if len(times) >= 7:
-                            break
-                    except Exception:
-                        continue
-                if len(times) >= 7:
-                    break
-    except Exception:
-        pass
+    # Peta kode cuaca BMKG → estimasi CH (mm)
+    # Ref: https://data.bmkg.go.id/kode-cuaca/
+    BMKG_CH = {
+        "0":  0.0,  # Cerah
+        "1":  0.0,  # Cerah Berawan
+        "2":  0.0,  # Berawan
+        "3":  0.5,  # Berawan Tebal
+        "45": 0.0,  # Kabut
+        "60": 3.0,  # Hujan Ringan
+        "61": 3.0,  # Hujan Ringan
+        "63": 8.0,  # Hujan Sedang
+        "65":15.0,  # Hujan Lebat
+        "80": 5.0,  # Hujan Lokal
+        "81":10.0,  # Hujan Lebat Lokal
+        "95": 5.0,  # Hujan Petir
+        "97":15.0,  # Hujan Lebat dengan Petir
+    }
 
-    # Fallback jika BMKG tidak punya data
+    times, ch, tmax, tmin, hu, descs = [], [], [], [], [], []
+    sumber = "BMKG"
+
+    # ── Pakai data BMKG asli ──────────────────────────────────────────
+    if bmkg_data and bmkg_data.get("ok") and bmkg_data.get("daily"):
+        daily_list = bmkg_data["daily"][:7]
+        for d in daily_list:
+            wc    = d.get("weather_code", "0")
+            ch_mm = BMKG_CH.get(str(wc), 0.0)
+            times.append(d["date"])
+            tmax.append(d["t_max"])
+            tmin.append(d["t_min"])
+            ch.append(ch_mm)
+            hu.append(d.get("hu", 80))
+            descs.append(d.get("weather_desc", "Berawan"))
+
+    # ── Fallback Open-Meteo jika BMKG kosong ─────────────────────────
     if not times:
-        om = fetch_openmeteo()
-        daily = om.get("daily", {}) if om else {}
-        times = daily.get("time", [])[:7]
-        ch    = daily.get("precipitation_sum", [0]*7)[:7]
-        tmax  = daily.get("temperature_2m_max", [30]*7)[:7]
-        tmin  = daily.get("temperature_2m_min", [23]*7)[:7]
+        sumber = "Open-Meteo (fallback)"
+        try:
+            om    = fetch_openmeteo()
+            daily = om.get("daily", {}) if om else {}
+            times = daily.get("time", [])[:7]
+            ch    = daily.get("precipitation_sum", [0]*7)[:7]
+            tmax  = daily.get("temperature_2m_max", [30]*7)[:7]
+            tmin  = daily.get("temperature_2m_min", [23]*7)[:7]
+            hu    = [80] * len(times)
+            descs = [""] * len(times)
+        except Exception:
+            pass
 
-    if times:
-        fig.add_trace(go.Bar(
-            x=times, y=ch,
-            name="CH (mm)", marker_color="#38bdf8", opacity=0.85, yaxis="y",
-        ))
+    fig = go.Figure()
+    if not times:
+        fig.add_annotation(text="Data prakiraan tidak tersedia",
+                           xref="paper", yref="paper", x=0.5, y=0.5,
+                           showarrow=False, font=dict(color="#94a3b8", size=13))
+        fig.update_layout(**DARK)
+        return fig
+
+    # ── Bar CH ────────────────────────────────────────────────────────
+    bar_colors = []
+    for c in ch:
+        if c >= 15:   bar_colors.append("#ef4444")   # Lebat
+        elif c >= 8:  bar_colors.append("#f97316")   # Sedang
+        elif c >= 3:  bar_colors.append("#38bdf8")   # Ringan
+        else:         bar_colors.append("#1e40af")   # Tidak hujan
+
+    fig.add_trace(go.Bar(
+        x=times, y=ch,
+        name="Estimasi CH (mm)",
+        marker_color=bar_colors,
+        opacity=0.85,
+        yaxis="y",
+        text=[f"{v:.0f}" if v > 0 else "" for v in ch],
+        textposition="outside",
+        textfont=dict(size=9, color="#94a3b8"),
+        hovertemplate="<b>%{x}</b><br>CH: %{y:.1f} mm<extra></extra>",
+    ))
+
+    # ── Suhu Maks ─────────────────────────────────────────────────────
+    fig.add_trace(go.Scatter(
+        x=times, y=tmax,
+        name="Suhu Maks (°C)",
+        line=dict(color="#ef4444", width=2),
+        mode="lines+markers+text",
+        marker=dict(size=6, symbol="circle"),
+        text=[f"{v:.0f}°" for v in tmax],
+        textposition="top center",
+        textfont=dict(size=8, color="#ef4444"),
+        yaxis="y2",
+        hovertemplate="<b>%{x}</b><br>T.Maks: %{y:.1f}°C<extra></extra>",
+    ))
+
+    # ── Suhu Min ──────────────────────────────────────────────────────
+    fig.add_trace(go.Scatter(
+        x=times, y=tmin,
+        name="Suhu Min (°C)",
+        line=dict(color="#3b82f6", width=1.5, dash="dot"),
+        mode="lines+markers+text",
+        marker=dict(size=5, symbol="circle-open"),
+        text=[f"{v:.0f}°" for v in tmin],
+        textposition="bottom center",
+        textfont=dict(size=8, color="#3b82f6"),
+        yaxis="y2",
+        hovertemplate="<b>%{x}</b><br>T.Min: %{y:.1f}°C<extra></extra>",
+    ))
+
+    # ── Kelembaban ────────────────────────────────────────────────────
+    if any(h > 0 for h in hu):
         fig.add_trace(go.Scatter(
-            x=times, y=tmax,
-            name="Suhu Maks (°C)", line=dict(color="#ef4444", width=2),
-            mode="lines+markers", marker=dict(size=5), yaxis="y2",
+            x=times, y=hu,
+            name="Kelembaban (%)",
+            line=dict(color="#a78bfa", width=1, dash="dash"),
+            mode="lines",
+            yaxis="y3",
+            hovertemplate="<b>%{x}</b><br>RH: %{y:.0f}%<extra></extra>",
         ))
-        fig.add_trace(go.Scatter(
-            x=times, y=tmin,
-            name="Suhu Min (°C)",
-            line=dict(color="#3b82f6", width=1.5, dash="dot"),
-            mode="lines+markers", marker=dict(size=4), yaxis="y2",
-        ))
+
+    # ── Anotasi kondisi cuaca ────────────────────────────────────────
+    annotations = []
+    for i, (t, d) in enumerate(zip(times, descs)):
+        if d:
+            annotations.append(dict(
+                x=t, y=0, yref="y",
+                text=d[:12] + ("…" if len(d) > 12 else ""),
+                showarrow=False,
+                font=dict(size=7, color="#475569"),
+                yanchor="top",
+                yshift=-18,
+            ))
 
     fig.update_layout(
-        yaxis =dict(title="CH (mm)", showgrid=True, gridcolor="#1e293b"),
-        yaxis2=dict(title="Suhu (°C)", overlaying="y", side="right",
+        yaxis =dict(title="CH (mm)",    showgrid=True,  gridcolor="#1e293b",
+                    rangemode="tozero"),
+        yaxis2=dict(title="Suhu (°C)",  overlaying="y", side="right",
                     showgrid=False, range=[15, 40]),
-        annotations=[dict(
-            text="© Sumber: BMKG – api.bmkg.go.id | Kode: 32.01.30.2005",
-            xref="paper", yref="paper", x=0, y=-0.38,
+        yaxis3=dict(title="RH (%)",     overlaying="y", side="right",
+                    showgrid=False, range=[40, 110], position=0.97,
+                    visible=False),
+        annotations=annotations + [dict(
+            text=f"© Sumber: {sumber} – api.bmkg.go.id | Kode: 32.01.30.2005",
+            xref="paper", yref="paper", x=0, y=-0.42,
             showarrow=False, font=dict(size=8, color="#475569"),
         )],
         **DARK,
