@@ -1706,7 +1706,7 @@ def update_hist_title(year_range):
         yr_min = int(df["year"].min())
         yr_max = int(df["year"].max())
         data_range = f" [{yr_min}–{yr_max}]"
-    return f"📊 Analisis Tren Historis ({year_range[0]}–{year_range[1]})"
+    return f"📊 Data Curah Hujan Historis ({year_range[0]}–{year_range[1]})"
 
 # ─── CALLBACK: TAMPILKAN FUSION PANEL ─────────────────────────────────────────
 def breakdown_bar(label, value, color, unit=""):
