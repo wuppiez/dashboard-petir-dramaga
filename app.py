@@ -1230,7 +1230,7 @@ app.layout = html.Div([
         # ── ROW 2: PRAKIRAAN 7 HARI & KEL. TANAH ──────────────────────────────
         html.Div([
             html.Div([
-                html.H3("📅 Prakiraan 7 Hari", style={"color":"#f8fafc","margin":"0 0 20px","fontSize":"16px","fontWeight":"600"}),
+                html.H3("📅 Prakiraan Cuaca Harian", style={"color":"#f8fafc","margin":"0 0 20px","fontSize":"16px","fontWeight":"600"}),
                 dcc.Graph(id="chart-openmeteo-daily", config={"displayModeBar": False}, style={"height":"220px"}),
             ], style={"background": "rgba(15, 23, 42, 0.4)", "backdropFilter": "blur(16px)", "borderRadius": "20px", "padding": "32px", "flex": "2", "minWidth": "400px", "border": "1px solid rgba(255,255,255,0.05)", "boxShadow": "0 20px 40px rgba(0,0,0,0.3)"}),
             html.Div([
@@ -1293,7 +1293,7 @@ app.layout = html.Div([
                 html.Div([
                     html.Span("📚 Metodologi: ", style={"fontSize":"9px","color":"#475569","fontWeight":"600"}),
                     html.Span("Threshold P25/P50/P75 dari 8 kejadian bencana Desa Petir 2020–2024 | "
-                              "Bobot: CH 30% · Kum3 25% · Kum7 20% · RH 15% · ET₀ 5% · Angin 5% | "
+                              "Bobot: CH 30% · Kum3 25% · Kum7 20% · RH 8% · SM 7%· ET₀ 5% · Angin 5% | "
                               "Van Westen (2006), PVMBG (2018), Crozier (1999)",
                               style={"fontSize":"9px","color":"#334155"}),
                 ], style={"marginTop":"12px","paddingTop":"10px","borderTop":"1px solid #1e293b"}),
@@ -1311,7 +1311,7 @@ app.layout = html.Div([
         html.Div([
             html.Div([
                 html.Div([
-                    html.H3(id="hist-title", children="📊 Analisis Tren Historis",
+                    html.H3(id="hist-title", children="📊 Data Curah Hujan Historis",
                             style={"color": "#f8fafc", "margin": "0", "fontSize": "15px", "fontWeight": "600"}),
                     html.Div([
                         dcc.Dropdown(
@@ -1836,7 +1836,7 @@ def update_stat_cards(year_range):
         ("🌧", "Hari Hujan",       f"{(df['rainfall'] > 0.5).sum():,}","#3b82f6"),
         ("⛈️", "Hari Ekstrem >50mm", f"{(df['rainfall'] >= 50).sum():,}", "#ef4444"),
         ("📈", "Maks Harian",      f"{df['rainfall'].max():.1f} mm",  "#f59e0b"),
-        ("🗓", "Total Periode",    f"{df['rainfall'].sum()/1000:.1f} m","#8b5cf6"),
+        ("🗓", "Total Curah Hujan",    f"{df['rainfall'].sum():.1f} mm","#8b5cf6"),
     ]
     cards = []
     for icon, label, value, color in stats:
